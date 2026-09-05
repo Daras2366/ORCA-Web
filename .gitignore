@@ -1,0 +1,104 @@
+# =========================
+# Python
+# =========================
+
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Python packaging
+*.egg-info/
+.eggs/
+dist/
+build/
+wheels/
+
+# =========================
+# Environment / Secrets
+# =========================
+
+.env
+.env.*
+!.env.example
+
+# =========================
+# IDE / Editors
+# =========================
+
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.suo
+*.user
+*.userossc
+*.sln
+*.sw?
+.DS_Store
+
+# =========================
+# Logs
+# =========================
+
+*.log
+logs/
+
+# =========================
+# Jupyter
+# =========================
+
+.ipynb_checkpoints/
+
+# =========================
+# OS / Temporary files
+# =========================
+
+Thumbs.db
+Desktop.ini
+*.tmp
+*.temp
+
+# =========================
+# Node / Frontend
+# =========================
+
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+frontend/.output/
+frontend/.vinxi/
+frontend/.tanstack/
+frontend/.nitro/
+
+# Frontend local environment files
+frontend/.env
+frontend/.env.*
+frontend/.env.example
+
+# Frontend logs
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+frontend/pnpm-debug.log*
+frontend/lerna-debug.log*
+
+# =========================
+# Cloudflare / Wrangler
+# =========================
+
+frontend/.wrangler/
+frontend/.dev.vars
+
+# =========================
+# Local backups
+# =========================
+
+*.backup
+*.bak
