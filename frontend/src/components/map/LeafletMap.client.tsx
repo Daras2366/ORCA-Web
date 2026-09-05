@@ -79,6 +79,18 @@ function ZoneMapController({
   return null;
 }
 
+function LocationMapController({ location }: { location: UserLocation }) {
+  const map = useMap();
+
+  useEffect(() => {
+    map.flyTo([location.latitude, location.longitude], Math.max(map.getZoom(), 7), {
+      duration: 0.75,
+    });
+  }, [location.latitude, location.longitude, map]);
+
+  return null;
+}
+
 export default function LeafletMap({ zones, location, onViewDetails, locateRequest }: Props) {
   const markerRefs = useRef<Record<string, L.Marker | null>>({});
 
@@ -96,11 +108,9 @@ export default function LeafletMap({ zones, location, onViewDetails, locateReque
           attribution="&copy; OpenStreetMap contributors"
         />
 
-        <ZoneMapController
-          locateRequest={locateRequest}
-          markerRefs={markerRefs}
-          zones={zones}
-        />
+        <ZoneMapController locateRequest={locateRequest} markerRefs={markerRefs} zones={zones} />
+
+        <LocationMapController location={location} />
 
         <Marker position={[location.latitude, location.longitude]} icon={vesselIcon}>
           <Popup>
@@ -154,9 +164,7 @@ export default function LeafletMap({ zones, location, onViewDetails, locateReque
                   <div>
                     <p className="text-muted-foreground">Safety</p>
                     <p className="text-shell">
-                      {zone.safety_score != null
-                        ? `${zone.safety_score.toFixed(1)}/100`
-                        : "N/A"}
+                      {zone.safety_score != null ? `${zone.safety_score.toFixed(1)}/100` : "N/A"}
                     </p>
                   </div>
                 </div>

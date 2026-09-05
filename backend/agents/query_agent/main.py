@@ -1421,28 +1421,82 @@ def query(req: QueryRequest):
             "answer":"I can help with fishing zones, ocean conditions, safety reports and route estimates. Try asking: 'Where are the best fishing zones?', 'Is it safe near PFZ0319?', 'How far is PFZ0001?', or 'Is there any cyclone risk?'"}
 
 @app.get("/api/fishing-zones")
-def get_fishing_zones(latitude: float | None = None, longitude: float | None = None):
-    """Return PFZ zone data quickly for the frontend map.
+def get_fishing_zones(
+    latitude: float | None = None,
+    longitude: float | None = None
+):
+    """Return PFZ zone data for the frontend map, including safety scores."""
 
-    Expensive Safety and Routing agent calls are intentionally NOT made here.
-    They are fetched only when a specific zone is selected.
-    """
     try:
         x = df().copy()
 
-        # Keep PFZ zones when the label is available.
-        if "pfz_label" in x and not x[x.pfz_label == 1].empty:
+        if "pfz_label" in x.columns and not x[x.pfz_label == 1].empty:
             x = x[x.pfz_label == 1]
 
+        # ---------------------------------------------------------
+        # GET SAFETY FOR ALL PFZ ZONES IN ONE REQUEST
+        # ---------------------------------------------------------
+        try:
+            safety_request = requests.get(
+                f"{SAFETY_API}/safety/ranking",
+                timeout=15
+            )
+
+            if safety_request.status_code == 200:
+                safety_response = safety_request.json()
+            else:
+                safety_response = {
+                    "status": "error",
+                    "message": safety_request.text
+                }
+
+        except Exception as e:
+            safety_response = {
+                "status": "error",
+                "message": str(e)
+            }
+
+        safety_by_zone = {}
+
+        if safety_response.get("status") == "success":
+            for item in safety_response.get("zones", []):
+                zone_id = str(item.get("zone_id", "")).upper()
+
+                safety_score = item.get("safety_score")
+
+                if safety_score is not None:
+                    safety_score = round(
+                        float(safety_score) * 100,
+                        1
+                    )
+
+                safety_by_zone[zone_id] = safety_score
+
+        # ---------------------------------------------------------
+        # FISHING SCORE HELPERS
+        # ---------------------------------------------------------
         def norm_chl(v):
-            return max(0, min(1, (v - 0.05) / (0.50 - 0.05)))
+            return max(
+                0,
+                min(
+                    1,
+                    (v - 0.05) / (0.50 - 0.05)
+                )
+            )
 
         def sst_score(v):
-            return max(0, 1 - abs(v - 28) / 5)
+            return max(
+                0,
+                1 - abs(v - 28) / 5
+            )
 
+        # ---------------------------------------------------------
+        # BUILD ZONE RESPONSE
+        # ---------------------------------------------------------
         zones_response = []
 
         for _, r in x.iterrows():
+
             chl = pd.to_numeric(
                 r.get("chlorophyll_mean"),
                 errors="coerce"
@@ -1462,12 +1516,20 @@ def get_fishing_zones(latitude: float | None = None, longitude: float | None = N
 
             if pd.notna(chl):
                 components.append(
-                    ("chlorophyll", norm_chl(float(chl)), 0.40)
+                    (
+                        "chlorophyll",
+                        norm_chl(float(chl)),
+                        0.40
+                    )
                 )
 
             if pd.notna(ss):
                 components.append(
-                    ("sst", sst_score(float(ss)), 0.30)
+                    (
+                        "sst",
+                        sst_score(float(ss)),
+                        0.30
+                    )
                 )
 
             if pd.notna(cur):
@@ -1486,8 +1548,14 @@ def get_fishing_zones(latitude: float | None = None, longitude: float | None = N
                 )
 
             fishing_score = (
-                sum(value * weight for _, value, weight in components)
-                / sum(weight for _, value, weight in components)
+                sum(
+                    value * weight
+                    for _, value, weight in components
+                )
+                / sum(
+                    weight
+                    for _, value, weight in components
+                )
                 if components
                 else 0
             )
@@ -1499,30 +1567,43 @@ def get_fishing_zones(latitude: float | None = None, longitude: float | None = N
             else:
                 potential = "Low"
 
-            # Confidence based only on available ocean components.
             confidence = (
                 len(components) / 3
                 if components
                 else 0
             )
 
+            zone_id = str(r.zone_id)
+
+            safety_score = safety_by_zone.get(
+                zone_id.upper()
+            )
+
             zones_response.append({
-                "zone_id": str(r.zone_id),
+                "zone_id": zone_id,
                 "latitude": float(r.latitude),
                 "longitude": float(r.longitude),
                 "hsi": round(fishing_score, 2),
                 "potential": potential,
                 "recommended": False,
-                "sst_c": float(ss) if pd.notna(ss) else None,
-                "chlorophyll_mg_m3": (
-                    float(chl) if pd.notna(chl) else None
+                "sst_c": (
+                    float(ss)
+                    if pd.notna(ss)
+                    else None
                 ),
-                "safety_score": None,
+                "chlorophyll_mg_m3": (
+                    float(chl)
+                    if pd.notna(chl)
+                    else None
+                ),
+                "safety_score": safety_by_zone.get(str(r.zone_id).upper()),
                 "confidence": round(confidence, 2),
                 "fishing_score": round(fishing_score, 4)
             })
 
-        # Recommend the zone with the highest available fishing potential.
+        # ---------------------------------------------------------
+        # RECOMMEND BEST FISHING ZONE
+        # ---------------------------------------------------------
         if zones_response:
             zones_response.sort(
                 key=lambda z: z["fishing_score"],
@@ -1530,7 +1611,11 @@ def get_fishing_zones(latitude: float | None = None, longitude: float | None = N
             )
 
             zones_response[0]["recommended"] = True
-            recommended_zone_id = zones_response[0]["zone_id"]
+
+            recommended_zone_id = (
+                zones_response[0]["zone_id"]
+            )
+
         else:
             recommended_zone_id = None
 
