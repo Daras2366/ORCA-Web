@@ -1,6 +1,8 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from backend.agents.query_agent.schemas import QueryRequest
+from backend.gemini_client import ask_gemini
+from backend.agents.query_agent.gemini_planner import plan_query
 
 import requests, pandas as pd, re, os
 from datetime import datetime, timedelta
@@ -23,6 +25,35 @@ OCEAN_API="http://localhost:8002"
 SAFETY_API="http://localhost:8003"
 ROUTE_API="http://localhost:8004"
 DECISION_API="http://localhost:8000"
+
+def gemini_classify(query: str) -> str:
+    prompt = f"""
+You are the intent planner for ORCA, a marine intelligence system.
+
+Classify the user's request into ONE of these categories:
+
+- fishing
+- ocean
+- safety
+- route
+- general
+
+Return ONLY the category name.
+
+User request:
+{query}
+"""
+
+    return ask_gemini(prompt).strip().lower()
+
+def get_gemini_plan(query: str) -> dict:
+    """
+    Get Gemini's interpretation of the user's query.
+
+    Gemini is advisory only. The deterministic parser remains
+    the fallback/source for exact ORCA query handling.
+    """
+    return plan_query(query)
 
 BASE_DIR = os.path.dirname(
     os.path.dirname(
@@ -203,6 +234,299 @@ def direct_ocean_ranking(qt):
                      "sst_c":float(ss) if pd.notna(ss) else None})
     return rows
 
+def run_multi_agent_plan(p, gemini_plan, target_z=None):
+    """
+    Execute multiple ORCA specialist agents based on Gemini's plan.
+
+    Gemini decides which agents are needed.
+    The specialist agents provide the actual data.
+    The Decision Layer makes the final combined decision.
+
+    This function is only for current-data compound requests.
+    Future/forecast queries continue through the existing
+    deterministic forecast logic.
+    """
+
+    required_agents = gemini_plan.get("required_agents", [])
+
+    if not isinstance(required_agents, list):
+        required_agents = []
+
+    # ---------------------------------------------------------
+    # Determine the target zone
+    # ---------------------------------------------------------
+
+    # If the user explicitly supplied a zone, use it.
+    zone_id = p.get("zone_id") or target_z
+
+    # For fishing recommendations without an explicit zone,
+    # first use the Ocean Agent data to find the strongest zone.
+    if "ocean" in required_agents and not zone_id:
+
+        ocean_ranking = direct_ocean_ranking("highest_fishing")
+
+        if not ocean_ranking:
+            return {
+                "status": "error",
+                "mode": "multi_agent",
+                "parsed": p,
+                "message": "No ocean observations are available."
+            }
+
+        ocean_ranking.sort(
+            key=lambda x: x.get("fishing_score", 0),
+            reverse=True
+        )
+
+        zone_id = ocean_ranking[0]["zone_id"]
+
+    # If there is no fishing request but safety/route needs
+    # a zone, use the nearest zone to the user's location.
+    if not zone_id:
+        zone_id = target_z
+
+    if not zone_id:
+        return {
+            "status": "needs_location",
+            "mode": "multi_agent",
+            "parsed": p,
+            "answer": (
+                "Please provide a PFZ zone or your location "
+                "so I can determine which zone to analyse."
+            )
+        }
+
+    # ---------------------------------------------------------
+    # Call specialist agents
+    # ---------------------------------------------------------
+
+    ocean_result = None
+    safety_result = None
+    route_result = None
+
+    if "ocean" in required_agents:
+        ocean_result = ocean(zone_id)
+
+        if ocean_result.get("status") != "success":
+            return {
+                "status": "error",
+                "mode": "multi_agent",
+                "parsed": p,
+                "message": ocean_result.get(
+                    "message",
+                    "Ocean Agent failed."
+                )
+            }
+
+    if "safety" in required_agents:
+        safety_result = safety(zone_id)
+
+        if safety_result.get("status") != "success":
+            return {
+                "status": "error",
+                "mode": "multi_agent",
+                "parsed": p,
+                "message": safety_result.get(
+                    "message",
+                    "Safety Agent failed."
+                )
+            }
+
+    if "route" in required_agents:
+        route_result = route(zone_id)
+
+        if route_result.get("status") != "success":
+            return {
+                "status": "error",
+                "mode": "multi_agent",
+                "parsed": p,
+                "message": route_result.get(
+                    "message",
+                    "Route Agent failed."
+                )
+            }
+
+    # ---------------------------------------------------------
+    # Decision Layer
+    # ---------------------------------------------------------
+
+    # The Decision Layer requires all three agent outputs.
+    # If an agent was not requested, we don't manufacture data.
+    #
+    # Therefore the combined Decision Layer is only called
+    # when all three specialist agents are available.
+    if (
+        ocean_result is not None
+        and safety_result is not None
+        and route_result is not None
+    ):
+
+        decision_payload = {
+            "ocean": {
+                "zone_id": zone_id,
+                "score": float(
+                    ocean_result.get("fishing_score", 0)
+                ),
+                "evidence": ocean_result.get(
+                    "evidence",
+                    {}
+                )
+            },
+            "safety": {
+                "zone_id": zone_id,
+                "score": float(
+                    safety_result.get("risk_score", 0)
+                ),
+                "evidence": safety_result.get(
+                    "evidence",
+                    {}
+                )
+            },
+            "route": {
+                "zone_id": zone_id,
+                "score": float(
+                    route_result.get("route_score", 0)
+                ),
+                "evidence": route_result.get(
+                    "route_metrics",
+                    {}
+                )
+            }
+        }
+
+        decision_result = call(
+            f"{DECISION_API}/decision/combined",
+            decision_payload,
+            timeout=10
+        )
+
+        if decision_result.get("status") == "error":
+            return {
+                "status": "error",
+                "mode": "multi_agent",
+                "parsed": p,
+                "zone_id": zone_id,
+                "ocean": ocean_result,
+                "safety": safety_result,
+                "route": route_result,
+                "message": decision_result.get(
+                    "message",
+                    "Decision Layer failed."
+                )
+            }
+
+    else:
+        decision_result = None
+
+    # ---------------------------------------------------------
+    # Build grounded answer
+    # ---------------------------------------------------------
+
+    answer_parts = [
+        f"ORCA analysed {zone_id} using "
+        f"{', '.join(required_agents)}."
+    ]
+
+    if ocean_result is not None:
+
+        fishing_score = ocean_result.get(
+            "fishing_score"
+        )
+
+        if fishing_score is not None:
+            answer_parts.append(
+                f"Fishing potential score: "
+                f"{float(fishing_score):.2f}."
+            )
+
+    if safety_result is not None:
+
+        risk_score = safety_result.get(
+            "risk_score"
+        )
+
+        risk_level = safety_result.get(
+            "risk_level",
+            "UNKNOWN"
+        )
+
+        if risk_score is not None:
+            safety_score = (
+                1 - float(risk_score)
+            ) * 100
+
+            answer_parts.append(
+                f"Safety: {risk_level}, "
+                f"safety score "
+                f"{safety_score:.1f}/100."
+            )
+
+    if route_result is not None:
+
+        metrics = route_result.get(
+            "route_metrics",
+            {}
+        )
+
+        distance = metrics.get(
+            "distance_km"
+        )
+
+        travel_time = metrics.get(
+            "travel_time_hr"
+        )
+
+        if distance is not None:
+            route_text = (
+                f"Route distance: "
+                f"{float(distance):.2f} km"
+            )
+
+            if travel_time is not None:
+                route_text += (
+                    f", estimated travel time: "
+                    f"{float(travel_time):.2f} hours"
+                )
+
+            answer_parts.append(
+                route_text + "."
+            )
+
+    if decision_result:
+
+        decision = decision_result.get(
+            "decision"
+        )
+
+        final_score = decision_result.get(
+            "final_score"
+        )
+
+        if decision:
+            answer_parts.append(
+                f"Decision Layer recommendation: "
+                f"{decision}."
+            )
+
+        if final_score is not None:
+            answer_parts.append(
+                f"Combined decision score: "
+                f"{float(final_score):.2f}."
+            )
+
+    return {
+        "status": "success",
+        "mode": "multi_agent",
+        "zone_id": zone_id,
+        "parsed": p,
+        "gemini_plan": gemini_plan,
+        "ocean": ocean_result,
+        "safety": safety_result,
+        "route": route_result,
+        "decision": decision_result,
+        "answer": " ".join(answer_parts)
+    }
+
 @app.post("/query")
 @app.post("/api/query")
 def query(req: QueryRequest):
@@ -215,6 +539,38 @@ def query(req: QueryRequest):
         )
 
     p = parse(q)
+
+    # ---------------------------------------------------------
+    # GEMINI PLANNER
+    # ---------------------------------------------------------
+    # Gemini understands the user's request, while the existing
+    # deterministic parser continues to provide exact query
+    # handling and remains the fallback.
+    gemini_plan = get_gemini_plan(q)
+
+    p["gemini_plan"] = gemini_plan
+    
+    gemini_intent = gemini_plan.get("intent")
+
+    if gemini_intent and gemini_intent != "general":
+        if gemini_intent not in p["intents"]:
+            p["intents"].append(gemini_intent)
+
+    # Merge Gemini's required agents with the deterministic parser.
+    # The deterministic parser remains the fallback.
+    gemini_agents = gemini_plan.get("required_agents", [])
+
+    if not isinstance(gemini_agents, list):
+        gemini_agents = []
+
+    existing_agents = p.get("required_agents", [])
+
+    if not isinstance(existing_agents, list):
+        existing_agents = []
+
+    p["required_agents"] = list(
+        dict.fromkeys(existing_agents + gemini_agents)
+    )
 
     # If the user did not type coordinates in the question,
     # use the coordinates supplied by the frontend.
@@ -232,7 +588,33 @@ def query(req: QueryRequest):
 
     if not target_z and p["latitude"] is not None and p["longitude"] is not None:
         target_z = str(nearest(p["latitude"], p["longitude"]).zone_id)
-    
+
+    # ---------------------------------------------------------
+    # GEMINI MULTI-AGENT ORCHESTRATION
+    # ---------------------------------------------------------
+    #
+    # Only use this for current-data compound requests.
+    # Forecast/tomorrow queries continue through the existing
+    # deterministic forecast branches.
+    #
+    # This prevents current observations from being presented
+    # as future predictions.
+
+    gemini_agents = gemini_plan.get(
+        "required_agents",
+        []
+    )
+
+    if (
+        len(gemini_agents) >= 2
+        and "tomorrow" not in q.lower()
+    ):
+        return run_multi_agent_plan(
+            p,
+            gemini_plan,
+            target_z
+        )
+            
     # Current location
     if qt=="current_risk" and not z:
         if p["latitude"] is None:return {"status":"needs_location","parsed":p,"answer":"Please provide your current latitude and longitude."}
