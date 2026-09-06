@@ -27,6 +27,163 @@ SAFETY_API="http://localhost:8003"
 ROUTE_API="http://localhost:8004"
 DECISION_API="http://localhost:8000"
 
+# ---------------------------------------------------------
+# Conversation context
+# ---------------------------------------------------------
+#
+# Temporary in-memory store for conversational context.
+#
+# Key: conversation_id
+# Value: compact summary of the latest ORCA analysis.
+#
+# This is intentionally lightweight for local development.
+# It can later be replaced by persistent storage.
+# ---------------------------------------------------------
+
+CONVERSATION_CONTEXT = {}
+
+def get_conversation_context(conversation_id):
+    if not conversation_id:
+        return {}
+
+    context = CONVERSATION_CONTEXT.get(
+        conversation_id,
+        {}
+    )
+
+    if not isinstance(context, dict):
+        return {}
+
+    return context
+
+def save_conversation_context(
+    conversation_id,
+    parsed,
+    result
+):
+    if not conversation_id:
+        return
+
+    if not isinstance(result, dict):
+        return
+
+    previous_context = get_conversation_context(
+        conversation_id
+    )
+
+    previous_agents = previous_context.get(
+        "required_agents",
+        []
+    )
+
+    current_agents = parsed.get(
+        "required_agents",
+        []
+    )
+
+    gemini_agents = (
+        parsed.get("gemini_plan", {}).get(
+            "required_agents",
+            []
+        )
+        if isinstance(
+            parsed.get("gemini_plan", {}),
+            dict
+        )
+        else []
+    )
+
+    if not isinstance(previous_agents, list):
+        previous_agents = []
+
+    if not isinstance(current_agents, list):
+        current_agents = []
+
+    if not isinstance(gemini_agents, list):
+        gemini_agents = []
+
+    context_agents = list(
+        dict.fromkeys(
+            previous_agents
+            + current_agents
+            + gemini_agents
+        )
+    )
+
+    context = {
+        "last_query": parsed.get("query"),
+        "intent": (
+            parsed.get("gemini_plan", {}).get("intent")
+            or parsed.get("intents", [None])[0]
+            if isinstance(
+                parsed.get("gemini_plan", {}),
+                dict
+            )
+            else (
+                parsed.get("intents", [None])[0]
+                if parsed.get("intents")
+                else None
+            )
+        ),
+        "zone_id": result.get("zone_id"),
+        "decision": None,
+        "fishing_score": None,
+        "safety_risk_level": None,
+        "safety_risk_score": None,
+        "route": {},
+        "required_agents": context_agents,
+    }
+
+    decision = result.get("decision")
+
+    if isinstance(decision, dict):
+        context["decision"] = decision.get(
+            "decision"
+        )
+
+    ocean_result = result.get("ocean")
+
+    if isinstance(ocean_result, dict):
+        context["fishing_score"] = (
+            ocean_result.get("fishing_score")
+        )
+
+    safety_result = result.get("safety")
+
+    if isinstance(safety_result, dict):
+        context["safety_risk_level"] = (
+            safety_result.get("risk_level")
+        )
+
+        context["safety_risk_score"] = (
+            safety_result.get("risk_score")
+        )
+
+    route_result = result.get("route")
+
+    if isinstance(route_result, dict):
+        route_metrics = route_result.get(
+            "route_metrics",
+            {}
+        )
+
+        if isinstance(route_metrics, dict):
+            context["route"] = {
+                "distance_km": route_metrics.get(
+                    "distance_km"
+                ),
+                "travel_time_hr": route_metrics.get(
+                    "travel_time_hr"
+                ),
+                "fuel_l": route_metrics.get(
+                    "fuel_l"
+                ),
+            }
+
+    CONVERSATION_CONTEXT[
+        conversation_id
+    ] = context
+
 def gemini_classify(query: str) -> str:
     prompt = f"""
 You are the intent planner for ORCA, a marine intelligence system.
@@ -47,14 +204,21 @@ User request:
 
     return ask_gemini(prompt).strip().lower()
 
-def get_gemini_plan(query: str) -> dict:
+def get_gemini_plan(
+    query: str,
+    conversation_context: dict | None = None
+) -> dict:
     """
     Get Gemini's interpretation of the user's query.
 
-    Gemini is advisory only. The deterministic parser remains
-    the fallback/source for exact ORCA query handling.
+    Gemini receives the relevant previous conversation
+    context so that short follow-up questions can be
+    interpreted correctly.
     """
-    return plan_query(query)
+    return plan_query(
+        query,
+        conversation_context
+    )
 
 BASE_DIR = os.path.dirname(
     os.path.dirname(
@@ -456,12 +620,16 @@ def run_multi_agent_plan(p, gemini_plan, target_z=None):
 @app.post("/api/query")
 def query(req: QueryRequest):
     q = req.query.strip()
-    
+
     if not q:
         raise HTTPException(
             status_code=400,
             detail="Query cannot be empty"
         )
+
+    conversation_context = get_conversation_context(
+        req.conversation_id
+    )
 
     p = parse(q)
 
@@ -471,7 +639,7 @@ def query(req: QueryRequest):
     # Gemini understands the user's request, while the existing
     # deterministic parser continues to provide exact query
     # handling and remains the fallback.
-    gemini_plan = get_gemini_plan(q)
+    gemini_plan = get_gemini_plan(q, conversation_context)
 
     p["gemini_plan"] = gemini_plan
   
@@ -605,6 +773,53 @@ def query(req: QueryRequest):
         "required_agents",
         []
     )
+    
+    # ---------------------------------------------------------
+    # CONTEXTUAL FOLLOW-UP FALLBACK
+    # ---------------------------------------------------------
+    #
+    # Gemini is the primary semantic planner.
+    # This deterministic fallback protects very short
+    # follow-up questions such as "why?" from losing
+    # the previous conversation context.
+    # ---------------------------------------------------------
+
+    if conversation_context:
+        context_zone = conversation_context.get("zone_id")
+        context_agents = conversation_context.get("required_agents", [])
+
+        short_followup = q.lower().strip()
+
+        followup_phrases = {
+            "why",
+            "why?",
+            "why this zone",
+            "why this zone?",
+            "is it safe",
+            "is it safe?",
+            "what about the route",
+            "what about the route?",
+            "how far is it",
+            "how far is it?",
+            "how long will it take",
+            "how long will it take?",
+            "how much fuel",
+            "how much fuel?",
+            "what are the waves like",
+            "what are the waves like?",
+        }
+
+        if (short_followup in followup_phrases and context_zone):
+            if not p.get("zone_id"):
+                p["zone_id"] = context_zone
+
+            if (isinstance(context_agents, list) and context_agents):
+                gemini_agents = list(
+                    dict.fromkeys(
+                        gemini_agents
+                        + context_agents
+                    )
+                )
 
     if not isinstance(gemini_agents, list):
         gemini_agents = []
@@ -649,16 +864,10 @@ def query(req: QueryRequest):
         "how long",
     ]
 
-    if any(
-        keyword in query_lower
-        for keyword in safety_keywords
-    ):
+    if any(keyword in query_lower for keyword in safety_keywords):
         fallback_agents.append("safety")
 
-    if any(
-        keyword in query_lower
-        for keyword in route_keywords
-    ):
+    if any(keyword in query_lower for keyword in route_keywords):
         fallback_agents.append("route")
 
     required_agents = list(
@@ -667,10 +876,7 @@ def query(req: QueryRequest):
         )
     )
 
-    if (
-        len(required_agents) >= 2
-        and "tomorrow" not in query_lower
-    ):
+    if len(required_agents) >= 2 and "tomorrow" not in query_lower:
         fallback_plan = dict(gemini_plan)
 
         fallback_plan["required_agents"] = required_agents
@@ -679,11 +885,26 @@ def query(req: QueryRequest):
             if "fishing" in intents:
                 fallback_plan["intent"] = "fishing"
 
-        return run_multi_agent_plan(
+        result = run_multi_agent_plan(
             p,
             fallback_plan,
             target_z
         )
+
+        if (
+            isinstance(result, dict)
+            and result.get("status") == "success"
+        ):
+            save_conversation_context(
+                req.conversation_id,
+                p,
+                result
+            )
+
+        if isinstance(result, dict):
+            result["conversation_id"] = req.conversation_id
+
+        return result
             
     # Current location
     if qt=="current_risk" and not z:

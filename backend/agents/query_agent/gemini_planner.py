@@ -17,7 +17,7 @@ VALID_AGENTS = {
 }
 
 
-def plan_query(query: str) -> dict:
+def plan_query(query: str, conversation_context: dict | None = None) -> dict:
     """
     Use Gemini as the primary semantic planner for ORCA.
 
@@ -30,6 +30,9 @@ def plan_query(query: str) -> dict:
 
     Gemini does NOT answer the user here.
     """
+    
+    if not isinstance(conversation_context, dict):
+        conversation_context = {}
 
     prompt = f"""
 You are the AI planning and routing module of ORCA,
@@ -159,6 +162,27 @@ navigation, or fuel, include "route".
 
 A request may require multiple agents.
 
+FOLLOW-UP QUESTIONS:
+
+If the user asks a short follow-up such as:
+
+- why?
+- why this zone?
+- is it safe?
+- what about the route?
+- how far is it?
+- how long will it take?
+- how much fuel?
+- what are the waves like?
+- what about the wind?
+
+and the previous conversation context contains the
+information needed to answer it, use that context.
+
+Select the specialist agents needed for the follow-up.
+
+Do not treat a contextual follow-up as an unrelated new query.
+
 ==================================================
 ENTITY EXTRACTION
 ==================================================
@@ -249,6 +273,54 @@ Return exactly this JSON structure:
     }},
     "confidence": 0.95
 }}
+
+==================================================
+CONVERSATION CONTEXT
+==================================================
+
+The user may be continuing a previous ORCA conversation.
+
+The context below contains the most recent relevant ORCA
+analysis.
+
+Use it to understand follow-up questions.
+
+For example:
+
+Previous recommendation:
+PFZ0319
+
+User:
+"Why?"
+
+This should be interpreted as:
+"Why was PFZ0319 recommended?"
+
+Other examples:
+
+"Is it safe?"
+-> safety of the previously discussed zone
+
+"What about the route?"
+-> route to the previously discussed zone
+
+"How far is it?"
+-> distance to the previously discussed zone
+
+"What are the waves like?"
+-> wave conditions for the previously discussed zone
+
+"How much fuel?"
+-> fuel required for the previously discussed route
+
+Do NOT assume the previous context applies if the user
+clearly asks about a different zone or location.
+
+Previous context:
+
+{json.dumps(conversation_context, indent=2, default=str)}
+
+==================================================
 
 ==================================================
 USER QUERY
