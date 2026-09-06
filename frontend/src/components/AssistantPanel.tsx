@@ -34,7 +34,7 @@ function renderInlineMarkdown(text: string): ReactNode[] {
 
       if (boldText.trim().toUpperCase() === "CAUTION") {
         return (
-          <strong key={index} className="font-semibold text-red-400">
+          <strong key={index} className="font-semibold text-warn">
             CAUTION
           </strong>
         );

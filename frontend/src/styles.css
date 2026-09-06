@@ -76,54 +76,63 @@
   --font-sans:
     "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
 
-  /* ORCA maritime palette */
-  --abyss: oklch(0.15 0.069 328.4);
-  --deep: oklch(0.257 0.101 298.7);
-  --plum: oklch(0.361 0.092 319.9);
-  --rose: oklch(0.499 0.082 347.1);
-  --blush: oklch(0.811 0.048 24.7);
-  --shell: oklch(0.934 0.03 49.5);
+  /* ORCA deep-ocean palette */
+  /* --abyss  → deepest ocean floor (background) */
+  --abyss: oklch(0.14 0.038 220);
+  /* --deep   → dark navy surface (cards, panels) */
+  --deep: oklch(0.2 0.048 222);
+  /* --plum   → ocean mid-tone (secondary cards, hover) */
+  --plum: oklch(0.285 0.058 224);
+  /* --rose   → interactive ocean blue (primary buttons, accents) */
+  --rose: oklch(0.44 0.1 232);
+  /* --blush  → secondary text, muted highlights */
+  --blush: oklch(0.66 0.065 220);
+  /* --shell  → primary foreground text */
+  --shell: oklch(0.935 0.018 210);
 
-  --background: oklch(0.15 0.069 328.4);
-  --foreground: oklch(0.934 0.03 49.5);
-  --card: oklch(0.221 0.09 305);
-  --card-foreground: oklch(0.934 0.03 49.5);
-  --popover: oklch(0.257 0.101 298.7);
-  --popover-foreground: oklch(0.934 0.03 49.5);
-  --primary: oklch(0.499 0.082 347.1);
-  --primary-foreground: oklch(0.964 0.02 49.5);
-  --secondary: oklch(0.361 0.092 319.9);
-  --secondary-foreground: oklch(0.934 0.03 49.5);
-  --muted: oklch(0.3 0.085 312);
-  --muted-foreground: oklch(0.75 0.045 20);
-  --accent: oklch(0.811 0.048 24.7);
-  --accent-foreground: oklch(0.19 0.075 320);
+  --background: oklch(0.14 0.038 220);
+  --foreground: oklch(0.935 0.018 210);
+  --card: oklch(0.195 0.05 222);
+  --card-foreground: oklch(0.935 0.018 210);
+  --popover: oklch(0.2 0.048 222);
+  --popover-foreground: oklch(0.935 0.018 210);
+  /* --primary → cyan/teal accent (CTA buttons, focus rings) */
+  --primary: oklch(0.67 0.12 198);
+  --primary-foreground: oklch(0.12 0.03 218);
+  /* --secondary → ocean blue (secondary buttons) */
+  --secondary: oklch(0.285 0.058 224);
+  --secondary-foreground: oklch(0.935 0.018 210);
+  --muted: oklch(0.245 0.042 224);
+  --muted-foreground: oklch(0.62 0.045 218);
+  /* --accent → bright cyan/aqua for icons and highlights */
+  --accent: oklch(0.74 0.13 196);
+  --accent-foreground: oklch(0.12 0.03 218);
   --destructive: oklch(0.58 0.19 25);
   --destructive-foreground: oklch(0.964 0.02 49.5);
-  --border: oklch(0.361 0.092 319.9 / 55%);
-  --input: oklch(0.361 0.092 319.9 / 70%);
-  --ring: oklch(0.499 0.082 347.1);
+  --border: oklch(0.34 0.052 224 / 55%);
+  --input: oklch(0.34 0.052 224 / 70%);
+  --ring: oklch(0.67 0.12 198);
 
   --safe: oklch(0.72 0.15 155);
   --warn: oklch(0.79 0.15 82);
   --danger: oklch(0.63 0.19 25);
 
-  --chart-1: oklch(0.811 0.048 24.7);
-  --chart-2: oklch(0.499 0.082 347.1);
-  --chart-3: oklch(0.361 0.092 319.9);
+  --chart-1: oklch(0.74 0.13 196);
+  --chart-2: oklch(0.67 0.12 198);
+  --chart-3: oklch(0.285 0.058 224);
   --chart-4: oklch(0.72 0.15 155);
   --chart-5: oklch(0.79 0.15 82);
 
-  --sidebar: oklch(0.15 0.069 328.4);
-  --sidebar-foreground: oklch(0.85 0.035 30);
-  --sidebar-primary: oklch(0.361 0.092 319.9);
-  --sidebar-primary-foreground: oklch(0.934 0.03 49.5);
-  --sidebar-accent: oklch(0.257 0.101 298.7);
-  --sidebar-accent-foreground: oklch(0.934 0.03 49.5);
-  --sidebar-border: oklch(0.361 0.092 319.9 / 45%);
-  --sidebar-ring: oklch(0.499 0.082 347.1);
+  --sidebar: oklch(0.14 0.038 220);
+  --sidebar-foreground: oklch(0.88 0.022 212);
+  --sidebar-primary: oklch(0.285 0.058 224);
+  --sidebar-primary-foreground: oklch(0.935 0.018 210);
+  --sidebar-accent: oklch(0.2 0.048 222);
+  --sidebar-accent-foreground: oklch(0.935 0.018 210);
+  --sidebar-border: oklch(0.34 0.052 224 / 45%);
+  --sidebar-ring: oklch(0.67 0.12 198);
 
-  --shadow-panel: 0 1px 0 0 oklch(1 0 0 / 4%) inset, 0 8px 24px -12px oklch(0.1 0.05 320 / 80%);
+  --shadow-panel: 0 1px 0 0 oklch(1 0 0 / 4%) inset, 0 8px 24px -12px oklch(0.06 0.025 220 / 80%);
 }
 
 
@@ -160,7 +169,7 @@
   font-family: var(--font-sans);
 }
 .orca-map .leaflet-tile-pane {
-  filter: brightness(0.5) saturate(0.55) contrast(1.1) hue-rotate(275deg);
+  filter: brightness(0.9) saturate(1.05) contrast(1.02);
 }
 .orca-map .leaflet-control-zoom a {
   background-color: var(--deep);

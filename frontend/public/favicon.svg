@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48" role="img" aria-label="ORCA logo">
+  <!-- Circle background: --plum ocean mid-tone oklch(0.285 0.058 224) ≈ #0B2F4A -->
+  <circle cx="24" cy="24" r="23" fill="#0B2F4A" />
+  <!-- Wave path: --blush light ocean oklch(0.66 0.065 220) ≈ #6BAED6 -->
+  <path
+    d="M8 30c3.6 0 3.6-3.4 7.2-3.4S18.8 30 22.4 30s3.6-3.4 7.2-3.4S33.2 30 36.8 30 40.4 26.6 44 26.6"
+    fill="none"
+    stroke="#6BAED6"
+    stroke-width="2.4"
+    stroke-linecap="round"
+    transform="translate(-2 2)"
+  />
+  <!-- Orca body: --shell near-white oklch(0.935 0.018 210) ≈ #E8F4FB -->
+  <path
+    d="M12 20c4-7 11-11 20-11-1.5 5.5-5 9.5-10 11.5 2 .6 4.2.6 6.4 0-2.4 3.6-6.6 5.4-11 4.6-3-.6-5-2.6-5.4-5.1z"
+    fill="#E8F4FB"
+  />
+  <!-- Eye: --abyss deep navy oklch(0.14 0.038 220) ≈ #03121E -->
+  <circle cx="20.5" cy="18.5" r="1.5" fill="#03121E" />
+</svg>

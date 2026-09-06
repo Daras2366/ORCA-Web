@@ -77,12 +77,12 @@ export function Sidebar({ onNavigate }: { onNavigate?: (() => void) | undefined 
         }}
       />
 
-      {/* Subtle gradient overlay for readability */}
+      {/* Subtle gradient overlay for readability — deep ocean blue treatment */}
       <div
         className="absolute inset-0 w-full h-full"
         style={{
           background:
-            "linear-gradient(to bottom, rgba(10, 10, 30, 0.85) 0%, rgba(10, 10, 30, 0.6) 25%, rgba(10, 10, 30, 0.3) 50%, rgba(10, 10, 30, 0.1) 75%, rgba(10, 10, 30, 0.05) 100%)",
+            "linear-gradient(to bottom, rgba(3, 18, 32, 0.88) 0%, rgba(3, 18, 32, 0.65) 25%, rgba(3, 18, 32, 0.35) 50%, rgba(3, 18, 32, 0.12) 75%, rgba(3, 18, 32, 0.06) 100%)",
         }}
       />
 

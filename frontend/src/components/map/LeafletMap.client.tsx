@@ -14,7 +14,7 @@ function zoneColor(zone: FishingZone) {
 function zoneIcon(zone: FishingZone) {
   const size = zone.recommended ? 30 : 22;
   const ring = zone.recommended
-    ? `box-shadow:0 0 0 3px var(--rose);`
+    ? `box-shadow:0 0 0 3px var(--accent);`
     : `box-shadow:0 0 0 2px var(--abyss);`;
   return L.divIcon({
     className: "",
@@ -22,7 +22,7 @@ function zoneIcon(zone: FishingZone) {
     iconAnchor: [size / 2, size / 2],
     html: `<div style="width:${size}px;height:${size}px;border-radius:9999px;background:${zoneColor(
       zone,
-    )};${ring}display:flex;align-items:center;justify-content:center;color:#190019;font-size:10px;font-weight:700;font-family:Inter,sans-serif;">${
+    )};${ring}display:flex;align-items:center;justify-content:center;color:#03121e;font-size:10px;font-weight:700;font-family:Inter,sans-serif;">${
       zone.recommended ? "★" : ""
     }</div>`,
   });
