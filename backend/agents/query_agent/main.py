@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.agents.query_agent.schemas import QueryRequest
 from backend.gemini_client import ask_gemini
 from backend.agents.query_agent.gemini_planner import plan_query
+from backend.agents.query_agent.gemini_synthesizer import synthesize_answer
 
 import requests, pandas as pd, re, os
 from datetime import datetime, timedelta
@@ -388,7 +389,7 @@ def run_multi_agent_plan(p, gemini_plan, target_z=None):
                     route_result.get("route_score", 0)
                 ),
                 "evidence": route_result.get(
-                    "route_metrics",
+                    "evidence",
                     {}
                 )
             }
@@ -415,117 +416,41 @@ def run_multi_agent_plan(p, gemini_plan, target_z=None):
                 )
             }
 
-    else:
-        decision_result = None
+        # ---------------------------------------------------------
+        # GEMINI SYNTHESIS
+        # ---------------------------------------------------------
+        #
+        # The specialist agents and Decision Layer have already
+        # produced the verified numerical results.
+        #
+        # Gemini is only responsible for explaining those results
+        # naturally to the user.
+        #
+        # The Decision Layer remains authoritative.
+        # ---------------------------------------------------------
 
-    # ---------------------------------------------------------
-    # Build grounded answer
-    # ---------------------------------------------------------
-
-    answer_parts = [
-        f"ORCA analysed {zone_id} using "
-        f"{', '.join(required_agents)}."
-    ]
-
-    if ocean_result is not None:
-
-        fishing_score = ocean_result.get(
-            "fishing_score"
+        answer = synthesize_answer(
+            user_query=p.get("query", ""),
+            zone_id=zone_id,
+            ocean_result=ocean_result,
+            safety_result=safety_result,
+            route_result=route_result,
+            decision_result=decision_result,
+            language=p.get("language", "en"),
         )
 
-        if fishing_score is not None:
-            answer_parts.append(
-                f"Fishing potential score: "
-                f"{float(fishing_score):.2f}."
-            )
-
-    if safety_result is not None:
-
-        risk_score = safety_result.get(
-            "risk_score"
-        )
-
-        risk_level = safety_result.get(
-            "risk_level",
-            "UNKNOWN"
-        )
-
-        if risk_score is not None:
-            safety_score = (
-                1 - float(risk_score)
-            ) * 100
-
-            answer_parts.append(
-                f"Safety: {risk_level}, "
-                f"safety score "
-                f"{safety_score:.1f}/100."
-            )
-
-    if route_result is not None:
-
-        metrics = route_result.get(
-            "route_metrics",
-            {}
-        )
-
-        distance = metrics.get(
-            "distance_km"
-        )
-
-        travel_time = metrics.get(
-            "travel_time_hr"
-        )
-
-        if distance is not None:
-            route_text = (
-                f"Route distance: "
-                f"{float(distance):.2f} km"
-            )
-
-            if travel_time is not None:
-                route_text += (
-                    f", estimated travel time: "
-                    f"{float(travel_time):.2f} hours"
-                )
-
-            answer_parts.append(
-                route_text + "."
-            )
-
-    if decision_result:
-
-        decision = decision_result.get(
-            "decision"
-        )
-
-        final_score = decision_result.get(
-            "final_score"
-        )
-
-        if decision:
-            answer_parts.append(
-                f"Decision Layer recommendation: "
-                f"{decision}."
-            )
-
-        if final_score is not None:
-            answer_parts.append(
-                f"Combined decision score: "
-                f"{float(final_score):.2f}."
-            )
-
-    return {
-        "status": "success",
-        "mode": "multi_agent",
-        "zone_id": zone_id,
-        "parsed": p,
-        "gemini_plan": gemini_plan,
-        "ocean": ocean_result,
-        "safety": safety_result,
-        "route": route_result,
-        "decision": decision_result,
-        "answer": " ".join(answer_parts)
-    }
+        return {
+            "status": "success",
+            "mode": "multi_agent",
+            "zone_id": zone_id,
+            "parsed": p,
+            "gemini_plan": gemini_plan,
+            "ocean": ocean_result,
+            "safety": safety_result,
+            "route": route_result,
+            "decision": decision_result,
+            "answer": answer,
+        }
 
 @app.post("/query")
 @app.post("/api/query")
@@ -549,6 +474,25 @@ def query(req: QueryRequest):
     gemini_plan = get_gemini_plan(q)
 
     p["gemini_plan"] = gemini_plan
+  
+    # Gemini is the primary semantic planner.
+    # Store its language, entities and requirements
+    # so the rest of ORCA can use them.
+
+    p["language"] = gemini_plan.get(
+        "language",
+        "en"
+    )
+
+    p["gemini_entities"] = gemini_plan.get(
+        "entities",
+        {}
+    )
+
+    p["gemini_requirements"] = gemini_plan.get(
+        "requirements",
+        {}
+    )
     
     gemini_intent = gemini_plan.get("intent")
 
@@ -579,6 +523,54 @@ def query(req: QueryRequest):
 
     if p["longitude"] is None:
         p["longitude"] = req.longitude
+        
+    # ---------------------------------------------------------
+    # USE GEMINI-EXTRACTED ENTITIES
+    # ---------------------------------------------------------
+
+    gemini_entities = p.get(
+        "gemini_entities",
+        {}
+    )
+
+    if not isinstance(gemini_entities, dict):
+        gemini_entities = {}
+
+    # Use Gemini coordinates only when the API request
+    # did not already provide coordinates.
+    if (
+        p.get("latitude") is None
+        and gemini_entities.get("latitude") is not None
+    ):
+        p["latitude"] = gemini_entities.get(
+            "latitude"
+        )
+
+    if (
+        p.get("longitude") is None
+        and gemini_entities.get("longitude") is not None
+    ):
+        p["longitude"] = gemini_entities.get(
+            "longitude"
+        )
+
+    # Use Gemini zone ID only when the parser/API
+    # did not already provide one.
+    if (
+        not p.get("zone_id")
+        and gemini_entities.get("zone_id")
+    ):
+        p["zone_id"] = gemini_entities.get(
+            "zone_id"
+        )
+
+    if (
+        not p.get("comparison_zone")
+        and gemini_entities.get("comparison_zone")
+    ):
+        p["comparison_zone"] = gemini_entities.get(
+            "comparison_zone"
+        )
 
     qt = p["query_type"]
     z = p["zone_id"]
@@ -600,18 +592,96 @@ def query(req: QueryRequest):
     # This prevents current observations from being presented
     # as future predictions.
 
+    # ---------------------------------------------------------
+    # MULTI-AGENT DETECTION
+    # ---------------------------------------------------------
+    #
+    # Gemini is the preferred planner, but ORCA must still
+    # recognize compound requests if Gemini is unavailable.
+    # The deterministic parser therefore acts as a fallback.
+    # ---------------------------------------------------------
+
     gemini_agents = gemini_plan.get(
         "required_agents",
         []
     )
 
-    if (
-        len(gemini_agents) >= 2
-        and "tomorrow" not in q.lower()
+    if not isinstance(gemini_agents, list):
+        gemini_agents = []
+
+    fallback_agents = []
+
+    intents = p.get("intents", [])
+
+    if "fishing" in intents or qt in {
+        "highest_fishing",
+        "highest_confidence",
+        "favourable_sst",
+        "favourable_chlorophyll",
+        "best_combination",
+    }:
+        fallback_agents.append("ocean")
+
+    query_lower = q.lower()
+
+    safety_keywords = [
+        "safe",
+        "safety",
+        "risk",
+        "danger",
+        "dangerous",
+        "weather",
+        "storm",
+        "cyclone",
+        "wave",
+        "wind",
+    ]
+
+    route_keywords = [
+        "route",
+        "distance",
+        "travel time",
+        "travel",
+        "fuel",
+        "navigation",
+        "navigate",
+        "how far",
+        "how long",
+    ]
+
+    if any(
+        keyword in query_lower
+        for keyword in safety_keywords
     ):
+        fallback_agents.append("safety")
+
+    if any(
+        keyword in query_lower
+        for keyword in route_keywords
+    ):
+        fallback_agents.append("route")
+
+    required_agents = list(
+        dict.fromkeys(
+            gemini_agents + fallback_agents
+        )
+    )
+
+    if (
+        len(required_agents) >= 2
+        and "tomorrow" not in query_lower
+    ):
+        fallback_plan = dict(gemini_plan)
+
+        fallback_plan["required_agents"] = required_agents
+
+        if fallback_plan.get("intent") == "general":
+            if "fishing" in intents:
+                fallback_plan["intent"] = "fishing"
+
         return run_multi_agent_plan(
             p,
-            gemini_plan,
+            fallback_plan,
             target_z
         )
             
