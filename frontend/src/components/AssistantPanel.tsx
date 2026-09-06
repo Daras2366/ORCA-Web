@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Loader2, MapPin, RotateCcw, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -25,35 +25,90 @@ function isHeadingLine(line: string): boolean {
  *  immediately beneath each line that mentions a known map zone ID.
  *  Heading-only lines are excluded from inline buttons; their IDs are
  *  collected and a single button block is emitted at the end instead. */
+function renderInlineMarkdown(text: string): ReactNode[] {
+  const parts = text.split(/(\*\*.*?\*\*)/g);
+
+  return parts.map((part, index) => {
+    if (part.startsWith("**") && part.endsWith("**")) {
+      const boldText = part.slice(2, -2);
+
+      if (boldText.trim().toUpperCase() === "CAUTION") {
+        return (
+          <strong key={index} className="font-semibold text-red-400">
+            CAUTION
+          </strong>
+        );
+      }
+
+      return (
+        <strong key={index} className="font-semibold text-shell">
+          {boldText}
+        </strong>
+      );
+    }
+
+    return <span key={index}>{part}</span>;
+  });
+}
+
 function AssistantMessageBody({ content }: { content: string }) {
   const { locateZone, availableZoneIds } = useMapLocate();
   const lines = content.split("\n");
 
-  // Collect zone IDs from heading lines so we can render them after the answer.
+  // Collect zone IDs from heading-only lines.
   const deferredIds = new Set<string>();
+
   for (const line of lines) {
     if (isHeadingLine(line)) {
       for (const id of extractZoneIds(line)) {
-        if (availableZoneIds.has(id)) deferredIds.add(id);
+        if (availableZoneIds.has(id)) {
+          deferredIds.add(id);
+        }
       }
     }
   }
 
   return (
-    <>
+    <div className="space-y-2">
       {lines.map((line, i) => {
-        const heading = isHeadingLine(line);
-        // On heading lines emit no button (deferred to end).
+        const trimmed = line.trim();
+
+        // Preserve completely blank lines without creating huge gaps.
+        if (!trimmed) {
+          return <div key={i} className="h-1" />;
+        }
+
+        const heading = isHeadingLine(trimmed);
+
         const idsInLine = heading
           ? []
-          : [...new Set(extractZoneIds(line).filter((id) => availableZoneIds.has(id)))];
+          : [...new Set(extractZoneIds(trimmed).filter((id) => availableZoneIds.has(id)))];
+
+        // Markdown bullet
+        const isBullet = /^[-*]\s+/.test(trimmed);
+        const bulletText = isBullet ? trimmed.replace(/^[-*]\s+/, "") : trimmed;
+
+        // Markdown numbered list
+        const numberedMatch = trimmed.match(/^(\d+)\.\s+(.*)$/);
+
         return (
-          <span key={i}>
-            {/* Restore the newline that split() consumed, except before the first line */}
-            {i > 0 && "\n"}
-            {line}
+          <div key={i} className="leading-6">
+            {isBullet ? (
+              <div className="flex gap-2">
+                <span className="shrink-0">•</span>
+                <span>{renderInlineMarkdown(bulletText)}</span>
+              </div>
+            ) : numberedMatch ? (
+              <div className="flex gap-2">
+                <span className="shrink-0">{numberedMatch[1]}.</span>
+                <span>{renderInlineMarkdown(numberedMatch[2])}</span>
+              </div>
+            ) : (
+              <span>{renderInlineMarkdown(trimmed)}</span>
+            )}
+
             {idsInLine.length > 0 && (
-              <span className="mt-1 flex flex-wrap gap-2">
+              <div className="mt-1 flex flex-wrap gap-2">
                 {idsInLine.map((zoneId) => (
                   <Button
                     key={zoneId}
@@ -63,17 +118,18 @@ function AssistantMessageBody({ content }: { content: string }) {
                     className="h-7 gap-1.5 text-xs"
                     onClick={() => locateZone(zoneId)}
                   >
-                    📍 Locate on map
+                    <MapPin className="size-3.5" />
+                    Locate on map
                   </Button>
                 ))}
-              </span>
+              </div>
             )}
-          </span>
+          </div>
         );
       })}
-      {/* Buttons for heading-only zone IDs, placed after the full answer */}
+
       {deferredIds.size > 0 && (
-        <span className="mt-2 flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2 pt-1">
           {[...deferredIds].map((zoneId) => (
             <Button
               key={zoneId}
@@ -83,12 +139,13 @@ function AssistantMessageBody({ content }: { content: string }) {
               className="h-7 gap-1.5 text-xs"
               onClick={() => locateZone(zoneId)}
             >
-              📍 Locate on map
+              <MapPin className="size-3.5" />
+              Locate on map
             </Button>
           ))}
-        </span>
+        </div>
       )}
-    </>
+    </div>
   );
 }
 
@@ -187,7 +244,7 @@ export function AssistantPanel() {
             ) : (
               <div key={m.id} className="flex gap-2">
                 <OrcaLogo className="mt-0.5 size-5 shrink-0" />
-                <div className="max-w-[90%] text-sm leading-relaxed text-shell whitespace-pre-wrap">
+                <div className="max-w-[92%] text-sm leading-6 text-shell">
                   <AssistantMessageBody content={m.content} />
                 </div>
               </div>
