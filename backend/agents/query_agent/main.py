@@ -11,9 +11,12 @@ from math import radians, sin, cos, asin, sqrt
 
 app = FastAPI(title="ORCA Query Agent", version="7.0.0")
 
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:8080")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
+        FRONTEND_URL,
         "http://localhost:8080",
         "http://localhost:5173",
     ],
@@ -22,10 +25,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-OCEAN_API="http://localhost:8002"
-SAFETY_API="http://localhost:8003"
-ROUTE_API="http://localhost:8004"
-DECISION_API="http://localhost:8000"
+OCEAN_API = os.getenv("OCEAN_API", "http://localhost:8002")
+SAFETY_API = os.getenv("SAFETY_API", "http://localhost:8003")
+ROUTE_API = os.getenv("ROUTE_API", "http://localhost:8004")
+DECISION_API = os.getenv("DECISION_API", "http://localhost:8000")
 
 # ---------------------------------------------------------
 # Conversation context
