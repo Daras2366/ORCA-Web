@@ -615,6 +615,43 @@ def run_multi_agent_plan(p, gemini_plan, target_z=None):
             "decision": decision_result,
             "answer": answer,
         }
+        
+    # ---------------------------------------------------------
+    # PARTIAL MULTI-AGENT SYNTHESIS
+    # ---------------------------------------------------------
+    #
+    # Some questions only require two agents, for example:
+    # "Is PFZ0319 good for fishing and is it safe?"
+    #
+    # In these cases the Decision Layer cannot be called
+    # because it requires ocean + safety + route.
+    #
+    # Gemini can still explain the verified specialist
+    # results without a combined Decision Layer result.
+    # ---------------------------------------------------------
+
+    answer = synthesize_answer(
+        user_query=p.get("query", ""),
+        zone_id=zone_id,
+        ocean_result=ocean_result,
+        safety_result=safety_result,
+        route_result=route_result,
+        decision_result=None,
+        language=p.get("language", "en"),
+    )
+
+    return {
+        "status": "success",
+        "mode": "multi_agent_partial",
+        "zone_id": zone_id,
+        "parsed": p,
+        "gemini_plan": gemini_plan,
+        "ocean": ocean_result,
+        "safety": safety_result,
+        "route": route_result,
+        "decision": None,
+        "answer": answer,
+    }
 
 @app.post("/query")
 @app.post("/api/query")

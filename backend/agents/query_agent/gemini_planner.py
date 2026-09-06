@@ -103,14 +103,14 @@ Use exactly one main intent:
 LANGUAGE
 ==================================================
 
-Detect the language of the user's query.
+Detect the language AND writing style of the user's query.
 
-Return a BCP-47 language code when possible.
-
-Examples:
+Return one of these language codes:
 
 English -> "en"
-Hindi -> "hi"
+Hindi (Devanagari script) -> "hi"
+Hinglish (Hindi written using Latin/Roman script, often mixed
+with English words) -> "hinglish"
 Marathi -> "mr"
 Tamil -> "ta"
 Telugu -> "te"
@@ -120,10 +120,35 @@ Kannada -> "kn"
 Gujarati -> "gu"
 Punjabi -> "pa"
 
-If uncertain, use "en".
+IMPORTANT HINGLISH RULE:
 
-The language is important because ORCA's final response
-should eventually be generated in the user's language.
+If the user writes Hindi using English/Roman letters, classify it
+as "hinglish", NOT "hi".
+
+Examples:
+
+"Mujhe fishing ke liye best zone batao"
+-> "hinglish"
+
+"Mujhe batao wahan jaana safe hai ya nahi"
+-> "hinglish"
+
+"Aaj samundar ka weather kaisa hai?"
+-> "hinglish"
+
+"Which fishing zone is best?"
+-> "en"
+
+"मुझे मछली पकड़ने के लिए सबसे अच्छी जगह बताओ"
+-> "hi"
+
+Do NOT classify Romanized Hindi as Hindi ("hi").
+
+The distinction is important because Hinglish responses must use
+Roman/Latin script, while Hindi responses must use Devanagari.
+
+The language value controls the writing style of ORCA's final
+response.
 
 ==================================================
 AGENT SELECTION RULES
