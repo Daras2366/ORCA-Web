@@ -52,7 +52,15 @@ export function Header({ onOpenMenu }: { onOpenMenu?: () => void }) {
   };
 
   return (
-    <header className="flex flex-wrap items-start justify-between gap-4 border-b border-border px-4 py-4 md:px-6">
+    <header
+      className="relative flex flex-wrap items-start justify-between gap-4 overflow-hidden border-b border-border px-4 py-4 md:px-6"
+      style={{
+        backgroundImage: "url('/images/orca-header-bg.png')",
+        backgroundSize: "cover",
+        backgroundPosition: "center 35%",
+        backgroundRepeat: "no-repeat",
+      }}
+    >
       <div className="flex items-start gap-3">
         {onOpenMenu && (
           <Button variant="ghost" size="icon" className="lg:hidden" onClick={onOpenMenu}>

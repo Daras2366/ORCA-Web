@@ -76,65 +76,80 @@
   --font-sans:
     "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
 
-  /* ORCA deep-ocean palette */
-  /* --abyss  → deepest ocean floor (background) */
-  --abyss: oklch(0.14 0.038 220);
-  /* --deep   → dark navy surface (cards, panels) */
-  --deep: oklch(0.2 0.048 222);
-  /* --plum   → ocean mid-tone (secondary cards, hover) */
-  --plum: oklch(0.285 0.058 224);
-  /* --rose   → interactive ocean blue (primary buttons, accents) */
-  --rose: oklch(0.44 0.1 232);
-  /* --blush  → secondary text, muted highlights */
-  --blush: oklch(0.66 0.065 220);
-  /* --shell  → primary foreground text */
-  --shell: oklch(0.935 0.018 210);
+  /* ORCA refined deep-ocean palette */
 
-  --background: oklch(0.14 0.038 220);
-  --foreground: oklch(0.935 0.018 210);
-  --card: oklch(0.195 0.05 222);
-  --card-foreground: oklch(0.935 0.018 210);
-  --popover: oklch(0.2 0.048 222);
-  --popover-foreground: oklch(0.935 0.018 210);
-  /* --primary → cyan/teal accent (CTA buttons, focus rings) */
-  --primary: oklch(0.67 0.12 198);
-  --primary-foreground: oklch(0.12 0.03 218);
-  /* --secondary → ocean blue (secondary buttons) */
-  --secondary: oklch(0.285 0.058 224);
-  --secondary-foreground: oklch(0.935 0.018 210);
-  --muted: oklch(0.245 0.042 224);
-  --muted-foreground: oklch(0.62 0.045 218);
-  /* --accent → bright cyan/aqua for icons and highlights */
-  --accent: oklch(0.74 0.13 196);
-  --accent-foreground: oklch(0.12 0.03 218);
+  /* Core ocean surfaces */
+  --abyss: oklch(0.19 0.038 220);
+  --deep: oklch(0.24 0.048 222);
+  --plum: oklch(0.31 0.058 224);
+  --rose: oklch(0.47 0.10 232);
+  --blush: oklch(0.70 0.065 220);
+  --shell: oklch(0.95 0.018 210);
+
+  /* Main application */
+  --background: oklch(0.19 0.038 220);
+  --foreground: oklch(0.95 0.018 210);
+
+  /* Cards and panels */
+  --card: oklch(0.235 0.05 222);
+  --card-foreground: oklch(0.95 0.018 210);
+
+  /* Popovers */
+  --popover: oklch(0.25 0.048 222);
+  --popover-foreground: oklch(0.95 0.018 210);
+
+  /* Primary cyan */
+  --primary: oklch(0.69 0.12 198);
+  --primary-foreground: oklch(0.16 0.03 218);
+
+  /* Secondary ocean blue */
+  --secondary: oklch(0.31 0.058 224);
+  --secondary-foreground: oklch(0.95 0.018 210);
+
+  /* Muted surfaces/text */
+  --muted: oklch(0.285 0.042 224);
+  --muted-foreground: oklch(0.68 0.045 218);
+
+  /* Accent cyan */
+  --accent: oklch(0.76 0.13 196);
+  --accent-foreground: oklch(0.16 0.03 218);
+
+  /* Safety */
   --destructive: oklch(0.58 0.19 25);
   --destructive-foreground: oklch(0.964 0.02 49.5);
-  --border: oklch(0.34 0.052 224 / 55%);
-  --input: oklch(0.34 0.052 224 / 70%);
-  --ring: oklch(0.67 0.12 198);
 
+  /* Borders and inputs */
+  --border: oklch(0.39 0.052 224 / 65%);
+  --input: oklch(0.39 0.052 224 / 75%);
+  --ring: oklch(0.69 0.12 198);
+
+  /* Safety status colors — keep these distinct */
   --safe: oklch(0.72 0.15 155);
   --warn: oklch(0.79 0.15 82);
   --danger: oklch(0.63 0.19 25);
 
-  --chart-1: oklch(0.74 0.13 196);
-  --chart-2: oklch(0.67 0.12 198);
-  --chart-3: oklch(0.285 0.058 224);
+  /* Charts */
+  --chart-1: oklch(0.76 0.13 196);
+  --chart-2: oklch(0.69 0.12 198);
+  --chart-3: oklch(0.31 0.058 224);
   --chart-4: oklch(0.72 0.15 155);
   --chart-5: oklch(0.79 0.15 82);
 
-  --sidebar: oklch(0.14 0.038 220);
-  --sidebar-foreground: oklch(0.88 0.022 212);
-  --sidebar-primary: oklch(0.285 0.058 224);
-  --sidebar-primary-foreground: oklch(0.935 0.018 210);
-  --sidebar-accent: oklch(0.2 0.048 222);
-  --sidebar-accent-foreground: oklch(0.935 0.018 210);
-  --sidebar-border: oklch(0.34 0.052 224 / 45%);
-  --sidebar-ring: oklch(0.67 0.12 198);
+  /* Sidebar */
+  --sidebar: oklch(0.18 0.038 220);
+  --sidebar-foreground: oklch(0.90 0.022 212);
+  --sidebar-primary: oklch(0.31 0.058 224);
+  --sidebar-primary-foreground: oklch(0.95 0.018 210);
+  --sidebar-accent: oklch(0.24 0.048 222);
+  --sidebar-accent-foreground: oklch(0.95 0.018 210);
+  --sidebar-border: oklch(0.39 0.052 224 / 55%);
+  --sidebar-ring: oklch(0.69 0.12 198);
 
-  --shadow-panel: 0 1px 0 0 oklch(1 0 0 / 4%) inset, 0 8px 24px -12px oklch(0.06 0.025 220 / 80%);
+  /* Softer, neutral deep-ocean shadow */
+  --shadow-panel:
+    0 1px 0 0 oklch(1 0 0 / 5%) inset,
+    0 8px 24px -12px oklch(0.08 0.025 220 / 70%);
 }
-
 
 @layer base {
   * {

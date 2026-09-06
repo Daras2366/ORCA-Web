@@ -82,7 +82,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: (() => void) | undefined 
         className="absolute inset-0 w-full h-full"
         style={{
           background:
-            "linear-gradient(to bottom, rgba(3, 18, 32, 0.88) 0%, rgba(3, 18, 32, 0.65) 25%, rgba(3, 18, 32, 0.35) 50%, rgba(3, 18, 32, 0.12) 75%, rgba(3, 18, 32, 0.06) 100%)",
+            "linear-gradient(to bottom, rgba(3, 18, 32, 0.70) 0%, rgba(3, 18, 32, 0.48) 25%, rgba(3, 18, 32, 0.28) 50%, rgba(3, 18, 32, 0.12) 75%, rgba(3, 18, 32, 0.05) 100%)",
         }}
       />
 
