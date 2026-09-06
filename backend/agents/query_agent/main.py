@@ -913,7 +913,7 @@ def query(req: QueryRequest):
         )
     )
 
-    if len(required_agents) >= 2 and "tomorrow" not in query_lower:
+    if len(required_agents) >= 1 and "tomorrow" not in query_lower:
         fallback_plan = dict(gemini_plan)
 
         fallback_plan["required_agents"] = required_agents
@@ -2126,9 +2126,41 @@ def query(req: QueryRequest):
         return {"status":"needs_location","mode":qt,"parsed":p,
                 "answer":"Harbour-to-zone geometry requires the harbour latitude and longitude. Provide the harbour coordinates to generate the route."}
 
-    # Catch-all: return a helpful fallback
-    return {"status":"success","mode":"general","parsed":p,
-            "answer":"I can help with fishing zones, ocean conditions, safety reports and route estimates. Try asking: 'Where are the best fishing zones?', 'Is it safe near PFZ0319?', 'How far is PFZ0001?', or 'Is there any cyclone risk?'"}
+    # Catch-all: let Gemini answer general questions
+    general_prompt = f"""
+    You are ORCA AI Assistant.
+
+    Answer the user's question naturally and directly.
+
+    If the question is unrelated to ORCA or marine topics,
+    you may still answer it normally.
+
+    Do not invent ORCA data, measurements, locations, scores,
+    or forecasts.
+
+    Respond in the user's language.
+
+    User's question:
+    {q}
+    """
+
+    try:
+        answer = ask_gemini(general_prompt)
+
+        return {
+            "status": "success",
+            "mode": "general",
+            "parsed": p,
+            "answer": answer.strip()
+        }
+
+    except Exception:
+        return {
+            "status": "error",
+            "mode": "general",
+            "parsed": p,
+            "answer": "I couldn't process that question right now."
+        }
 
 @app.get("/api/fishing-zones")
 def get_fishing_zones(

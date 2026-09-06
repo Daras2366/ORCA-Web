@@ -13,26 +13,114 @@ def parse_query(query: str):
     intents = []
 
     fishing_words = [
+        # English
         "fish", "fishing", "pfz", "fishing zone",
         "fishing potential", "chlorophyll", "sst",
-        "productivity"
+        "productivity",
+
+        # Hindi
+        "मछली", "मछली पकड़ना", "मछली पकड़ने",
+        "मछली पकड़ने का क्षेत्र", "क्लोरोफिल",
+        "जोखिम", "समुद्र",
+
+        # Tamil
+        "மீன்", "மீன்பிடி", "மீன்பிடிக்க",
+        "மீன்பிடி பகுதி", "குளோரோபில்",
+        "கடல்",
+
+        # Punjabi
+        "ਮੱਛੀ", "ਮੱਛੀ ਫੜਨ", "ਮੱਛੀ ਫੜਨ ਲਈ",
+        "ਮੱਛੀ ਫੜਨ ਵਾਲਾ ਇਲਾਕਾ", "ਕਲੋਰੋਫਿਲ",
+        "ਸਮੁੰਦਰ",
+
+        # Hinglish
+        "machhli", "machhli pakadna",
+        "fishing zone", "samundar", "sea"
+    ]
+    
+    ocean_words = [
+        # English
+        "ocean", "sea", "ocean condition",
+        "ocean conditions", "sea condition",
+        "sea conditions", "sst", "chlorophyll",
+        "current", "wave", "temperature",
+
+        # Hindi
+        "समुद्र", "समुद्र की स्थिति",
+        "समुद्री स्थिति", "समुद्र की हालत",
+        "तापमान", "क्लोरोफिल", "लहर",
+        "लहरें", "धारा",
+
+        # Tamil
+        "கடல்", "கடல் நிலைமை",
+        "கடல் நிலை", "வெப்பநிலை",
+        "குளோரோபில்", "அலை", "நீரோட்டம்",
+
+        # Punjabi
+        "ਸਮੁੰਦਰ", "ਸਮੁੰਦਰ ਦੀ ਸਥਿਤੀ",
+        "ਸਮੁੰਦਰ ਦੀ ਹਾਲਤ", "ਤਾਪਮਾਨ",
+        "ਕਲੋਰੋਫਿਲ", "ਲਹਿਰ", "ਲਹਿਰਾਂ",
+        "ਧਾਰਾ",
+
+        # Hinglish
+        "samundar", "samundar ki condition",
+        "sea condition", "lehar", "lehrein",
+        "temperature"
     ]
 
     safety_words = [
+        # English
         "safe", "safety", "risk", "danger",
-        "cyclone", "storm", "wind", "wave",
-        "avoid", "warning", "boat"
+        "dangerous", "cyclone", "storm",
+        "wind", "wave", "avoid", "warning",
+        "boat",
+
+        # Hindi
+        "सुरक्षित", "सुरक्षा", "जोखिम", "खतरा",
+        "खतरनाक", "चक्रवात", "तूफान",
+        "हवा", "लहर", "बचें", "चेतावनी",
+
+        # Tamil
+        "பாதுகாப்பு", "பாதுகாப்பான", "ஆபத்து",
+        "அபாயம்", "சூறாவளி", "புயல்",
+        "காற்று", "அலை",
+
+        # Punjabi
+        "ਸੁਰੱਖਿਅਤ", "ਸੁਰੱਖਿਆ", "ਖਤਰਾ",
+        "ਖ਼ਤਰਾ", "ਚੱਕਰਵਾਤ", "ਤੂਫ਼ਾਨ",
+        "ਹਵਾ", "ਲਹਿਰ",
+
+        # Hinglish
+        "safe", "safety", "risk", "danger",
+        "cyclone", "hawa", "lehar",
+        "surakshit", "khatra", "toofan"
     ]
 
     route_words = [
+        # English
         "route", "distance", "travel", "fuel",
-        "reach", "harbour", "harbor", "shortest",
-        "closest", "nearest", "litres",
-        "liters", "km"
+        "reach", "harbour", "harbor",
+        "shortest", "closest", "nearest",
+        "litres", "liters", "km",
+
+        # Hindi
+        "दूरी", "रास्ता", "मार्ग", "ईंधन",
+        "कितनी दूर", "कितना समय",
+
+        # Tamil
+        "தூரம்", "வழி", "எரிபொருள்",
+        "எவ்வளவு தூரம்", "எவ்வளவு நேரம்",
+
+        # Punjabi
+        "ਦੂਰੀ", "ਰਸਤਾ", "ਈਂਧਨ",
+        "ਕਿੰਨੀ ਦੂਰ", "ਕਿੰਨਾ ਸਮਾਂ"
     ]
 
     if any(word in text for word in fishing_words):
         intents.append("fishing")
+        
+    if any(word in text for word in ocean_words):
+        intents.append("ocean")
 
     if any(word in text for word in safety_words):
         intents.append("safety")
