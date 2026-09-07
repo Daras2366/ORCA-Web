@@ -334,7 +334,12 @@ def parse(q):
     elif "favourable chlorophyll" in t or "favorable chlorophyll" in t: qt="favourable_chlorophyll"
     elif "best combination" in t or ("pfz" in t and "sst" in t and "chlorophyll" in t): qt="best_combination"
     elif z2 and ("better for fishing" in t or "better for" in t or "why" in t): qt="fishing_comparison"
-    elif "within" in t and dist is not None: qt="nearby_zones"
+    elif dist is not None and (
+        "within" in t
+        or "radius" in t
+        or "around" in t
+    ):
+        qt="nearby_zones"
     elif "nearby" in t and "rank" in t: qt="nearby_ranking"
     elif "rank" in t and "fishing" in t: qt="nearby_ranking"
     elif z2 and ("safer" in t or "which is safer" in t): qt="safety_comparison"
@@ -761,6 +766,91 @@ def query(req: QueryRequest):
         p["longitude"] = gemini_entities.get(
             "longitude"
         )
+        
+    # ---------------------------------------------------------
+    # NEARBY FISHING ZONES — HANDLE DIRECTLY
+    # ---------------------------------------------------------
+    # A radius query asks for a LIST of zones.
+    # It must not go through the multi-agent single-zone flow.
+
+    if p["query_type"] == "nearby_zones":
+
+        if p["latitude"] is None or p["longitude"] is None:
+            return {
+                "status": "needs_location",
+                "mode": "nearby_zones",
+                "parsed": p,
+                "answer": (
+                    "Please allow location access so I can "
+                    "find fishing zones within the requested radius."
+                )
+            }
+
+        x = df().copy()
+
+        # Keep only PFZ observations
+        if "pfz_label" in x.columns:
+            pfz = x[x["pfz_label"] == 1]
+            if not pfz.empty:
+                x = pfz
+
+        # Calculate distance from vessel to every PFZ
+        x["distance_km"] = [
+            hav(
+                p["latitude"],
+                p["longitude"],
+                float(lat),
+                float(lon)
+            )
+            for lat, lon in zip(x.latitude, x.longitude)
+        ]
+
+        radius = p.get("distance_km") or 30
+
+        # Keep EVERY zone inside the requested radius
+        x = x[x["distance_km"] <= radius]
+
+        # Nearest first
+        x = x.sort_values("distance_km")
+
+        zones = [
+            {
+                "zone_id": str(row["zone_id"]),
+                "distance_km": round(float(row["distance_km"]), 1)
+            }
+            for _, row in x.iterrows()
+        ]
+
+        if not zones:
+            return {
+                "status": "success",
+                "mode": "nearby_zones",
+                "zones": [],
+                "answer": (
+                    f"No fishing zones were found within "
+                    f"{radius:g} km of your vessel."
+                )
+            }
+
+        # Create an actual numbered list for the chat UI
+        zone_lines = [
+            f"{i}. {zone['zone_id']} — "
+            f"{zone['distance_km']:.1f} km"
+            for i, zone in enumerate(zones, 1)
+        ]
+
+        answer = (
+            f"Found {len(zones)} fishing zones within "
+            f"{radius:g} km of your vessel:\n\n"
+            + "\n".join(zone_lines)
+        )
+
+        return {
+            "status": "success",
+            "mode": "nearby_zones",
+            "zones": zones,
+            "answer": answer
+        }
 
     # Use Gemini zone ID only when the parser/API
     # did not already provide one.
@@ -916,7 +1006,11 @@ def query(req: QueryRequest):
         )
     )
 
-    if len(required_agents) >= 1 and "tomorrow" not in query_lower:
+    if (
+        len(required_agents) >= 1
+        and "tomorrow" not in query_lower
+        and qt not in {"nearby_zones", "nearby_ranking", "closest"}
+    ):
         fallback_plan = dict(gemini_plan)
 
         fallback_plan["required_agents"] = required_agents

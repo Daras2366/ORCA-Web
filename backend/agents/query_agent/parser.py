@@ -269,7 +269,11 @@ def parse_query(query: str):
     ]):
         query_type = "safest"
 
-    elif "within" in text and distance_km is not None:
+    elif distance_km is not None and (
+        "within" in text
+        or "radius" in text
+        or "around" in text
+    ):
         query_type = "nearby"
 
     elif any(x in text for x in [

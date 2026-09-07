@@ -132,9 +132,9 @@ export const mockZoneFactors: ZoneFactor[] = [
 ];
 
 export const suggestedQuestions = [
-  "Where are the best fishing zones today?",
+  "Which fishing zones are within a 50 km radius of me?",
+  "Which fishing zone has the highest fishing potential today?",
   "Is it safe to go fishing tomorrow?",
-  "Which fishing zone is closest to me?",
   "Show ocean conditions near me.",
-  "Is there any cyclone risk?",
+  "Is there any cyclone or storm risk near me?",
 ];
