@@ -183,12 +183,7 @@ function LoginTab({ onSuccess }: { onSuccess: () => void }) {
           </p>
         )}
 
-        <Button
-          type="submit"
-          id="login-submit"
-          className="w-full"
-          disabled={loading}
-        >
+        <Button type="submit" id="login-submit" className="w-full" disabled={loading}>
           {loading ? "Signing in…" : "Sign in"}
         </Button>
       </form>
@@ -344,12 +339,7 @@ function RegisterTab({ onSuccess }: { onSuccess: () => void }) {
           </p>
         )}
 
-        <Button
-          type="submit"
-          id="register-submit"
-          className="w-full"
-          disabled={loading}
-        >
+        <Button type="submit" id="register-submit" className="w-full" disabled={loading}>
           {loading ? "Creating account…" : "Create account"}
         </Button>
       </form>
@@ -374,10 +364,9 @@ export function AuthModal({ open, onOpenChange }: AuthModalProps) {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         id="auth-modal"
-        className="max-w-md gap-0 overflow-hidden p-0"
+        className="max-w-md gap-0 overflow-hidden p-0 z-[1000]"
         style={{
-          background:
-            "linear-gradient(145deg, var(--deep) 0%, var(--abyss) 100%)",
+          background: "linear-gradient(145deg, var(--deep) 0%, var(--abyss) 100%)",
           border: "1px solid var(--border)",
         }}
       >

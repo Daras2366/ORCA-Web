@@ -17,6 +17,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.auth.router import router
+from backend.auth.vessel_router import router as vessel_router
 
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:8080")
 
@@ -39,6 +40,7 @@ app.add_middleware(
 )
 
 app.include_router(router)
+app.include_router(vessel_router)
 
 
 @app.get("/", tags=["health"])

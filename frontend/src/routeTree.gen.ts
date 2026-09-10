@@ -10,11 +10,11 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as ProfileRouteImport } from './routes/profile'
 import { Route as FishingZonesRouteImport } from './routes/fishing-zones'
 import { Route as HelpRouteImport } from './routes/help'
 import { Route as HistoryRouteImport } from './routes/history'
 import { Route as OceanConditionsRouteImport } from './routes/ocean-conditions'
+import { Route as ProfileRouteImport } from './routes/profile'
 import { Route as SafetyRouteImport } from './routes/safety'
 import { Route as SavedLocationsRouteImport } from './routes/saved-locations'
 import { Route as SettingsRouteImport } from './routes/settings'
@@ -22,11 +22,6 @@ import { Route as SettingsRouteImport } from './routes/settings'
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ProfileRoute = ProfileRouteImport.update({
-  id: '/profile',
-  path: '/profile',
   getParentRoute: () => rootRouteImport,
 } as any)
 const FishingZonesRoute = FishingZonesRouteImport.update({
@@ -49,6 +44,11 @@ const OceanConditionsRoute = OceanConditionsRouteImport.update({
   path: '/ocean-conditions',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ProfileRoute = ProfileRouteImport.update({
+  id: '/profile',
+  path: '/profile',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SafetyRoute = SafetyRouteImport.update({
   id: '/safety',
   path: '/safety',
@@ -67,22 +67,22 @@ const SettingsRoute = SettingsRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/profile': typeof ProfileRoute
   '/fishing-zones': typeof FishingZonesRoute
   '/help': typeof HelpRoute
   '/history': typeof HistoryRoute
   '/ocean-conditions': typeof OceanConditionsRoute
+  '/profile': typeof ProfileRoute
   '/safety': typeof SafetyRoute
   '/saved-locations': typeof SavedLocationsRoute
   '/settings': typeof SettingsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/profile': typeof ProfileRoute
   '/fishing-zones': typeof FishingZonesRoute
   '/help': typeof HelpRoute
   '/history': typeof HistoryRoute
   '/ocean-conditions': typeof OceanConditionsRoute
+  '/profile': typeof ProfileRoute
   '/safety': typeof SafetyRoute
   '/saved-locations': typeof SavedLocationsRoute
   '/settings': typeof SettingsRoute
@@ -90,11 +90,11 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/profile': typeof ProfileRoute
   '/fishing-zones': typeof FishingZonesRoute
   '/help': typeof HelpRoute
   '/history': typeof HistoryRoute
   '/ocean-conditions': typeof OceanConditionsRoute
+  '/profile': typeof ProfileRoute
   '/safety': typeof SafetyRoute
   '/saved-locations': typeof SavedLocationsRoute
   '/settings': typeof SettingsRoute
@@ -103,33 +103,33 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
-    | '/profile'
     | '/fishing-zones'
     | '/help'
     | '/history'
     | '/ocean-conditions'
+    | '/profile'
     | '/safety'
     | '/saved-locations'
     | '/settings'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
-    | '/profile'
     | '/fishing-zones'
     | '/help'
     | '/history'
     | '/ocean-conditions'
+    | '/profile'
     | '/safety'
     | '/saved-locations'
     | '/settings'
   id:
     | '__root__'
     | '/'
-    | '/profile'
     | '/fishing-zones'
     | '/help'
     | '/history'
     | '/ocean-conditions'
+    | '/profile'
     | '/safety'
     | '/saved-locations'
     | '/settings'
@@ -137,11 +137,11 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  ProfileRoute: typeof ProfileRoute
   FishingZonesRoute: typeof FishingZonesRoute
   HelpRoute: typeof HelpRoute
   HistoryRoute: typeof HistoryRoute
   OceanConditionsRoute: typeof OceanConditionsRoute
+  ProfileRoute: typeof ProfileRoute
   SafetyRoute: typeof SafetyRoute
   SavedLocationsRoute: typeof SavedLocationsRoute
   SettingsRoute: typeof SettingsRoute
@@ -154,13 +154,6 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/profile': {
-      id: '/profile'
-      path: '/profile'
-      fullPath: '/profile'
-      preLoaderRoute: typeof ProfileRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/fishing-zones': {
@@ -191,6 +184,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OceanConditionsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/profile': {
+      id: '/profile'
+      path: '/profile'
+      fullPath: '/profile'
+      preLoaderRoute: typeof ProfileRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/safety': {
       id: '/safety'
       path: '/safety'
@@ -217,11 +217,11 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  ProfileRoute: ProfileRoute,
   FishingZonesRoute: FishingZonesRoute,
-  HistoryRoute: HistoryRoute,
   HelpRoute: HelpRoute,
+  HistoryRoute: HistoryRoute,
   OceanConditionsRoute: OceanConditionsRoute,
+  ProfileRoute: ProfileRoute,
   SafetyRoute: SafetyRoute,
   SavedLocationsRoute: SavedLocationsRoute,
   SettingsRoute: SettingsRoute,

@@ -182,6 +182,7 @@
 .orca-map .leaflet-container {
   background-color: var(--abyss);
   font-family: var(--font-sans);
+  z-index: 1;
 }
 .orca-map .leaflet-tile-pane {
   filter: brightness(0.9) saturate(1.05) contrast(1.02);

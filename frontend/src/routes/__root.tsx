@@ -14,6 +14,7 @@ import { reportLovableError } from "../lib/lovable-error-reporting";
 import { LocationProvider } from "../hooks/useLocation";
 import { MapLocateProvider } from "../hooks/useMapLocate";
 import { AuthProvider } from "../hooks/useAuth";
+import { VesselProvider } from "../hooks/useVessels";
 
 function NotFoundComponent() {
   return (
@@ -133,12 +134,14 @@ function RootComponent() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
-        <LocationProvider>
-          <MapLocateProvider>
-            {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
-            <Outlet />
-          </MapLocateProvider>
-        </LocationProvider>
+        <VesselProvider>
+          <LocationProvider>
+            <MapLocateProvider>
+              {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
+              <Outlet />
+            </MapLocateProvider>
+          </LocationProvider>
+        </VesselProvider>
       </AuthProvider>
     </QueryClientProvider>
   );

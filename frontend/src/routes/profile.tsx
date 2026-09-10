@@ -11,6 +11,7 @@ import { useEffect } from "react";
 import { Calendar, Globe, Mail, Shield, User } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { useAuth } from "@/hooks/useAuth";
+import { VesselsPanel } from "@/components/vessels/VesselsPanel";
 
 const title = "My Profile — ORCA";
 const description = "View and manage your ORCA account profile.";
@@ -153,6 +154,9 @@ function ProfilePage() {
             />
           </div>
         </div>
+
+        {/* Vessels */}
+        <VesselsPanel />
 
         {/* Sign out */}
         <div className="panel p-4">
