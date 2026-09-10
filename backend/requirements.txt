@@ -1,9 +1,16 @@
 fastapi
 uvicorn[standard]
-pydantic
+pydantic[email]
 requests
 pandas
 numpy
 joblib
 google-genai
 python-dotenv
+# Auth dependencies
+sqlalchemy
+alembic
+psycopg2-binary
+python-jose[cryptography]
+bcrypt
+python-multipart

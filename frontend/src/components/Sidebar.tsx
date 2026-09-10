@@ -8,10 +8,12 @@ import {
   LayoutDashboard,
   Settings,
   ShieldAlert,
+  User,
   Waves,
 } from "lucide-react";
 import { OrcaLogo } from "./OrcaLogo";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/hooks/useAuth";
 
 const primaryNav = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -64,6 +66,8 @@ function NavList({
 }
 
 export function Sidebar({ onNavigate }: { onNavigate?: (() => void) | undefined }) {
+  const { user, isAuthenticated } = useAuth();
+
   return (
     <aside className="relative flex h-full w-full flex-col border-r border-sidebar-border bg-sidebar overflow-hidden">
       {/* Background image */}
@@ -107,6 +111,37 @@ export function Sidebar({ onNavigate }: { onNavigate?: (() => void) | undefined 
           <div className="my-3 h-px bg-sidebar-border/30" />
           <NavList items={tertiaryNav} onNavigate={onNavigate} />
         </nav>
+
+        {/* User identity footer */}
+        <div className="border-t border-sidebar-border/30 px-4 py-3">
+          {isAuthenticated && user ? (
+            <Link
+              to="/profile"
+              onClick={onNavigate}
+              className="flex items-center gap-2 rounded-lg px-2 py-1.5 transition-colors hover:bg-white/10"
+              id="sidebar-profile-link"
+            >
+              <div
+                className="flex size-7 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold text-primary-foreground"
+                style={{ background: "var(--primary)" }}
+              >
+                {user.name.split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase()}
+              </div>
+              <div className="min-w-0">
+                <p className="truncate text-xs font-medium text-shell">{user.name}</p>
+                <p className="truncate text-[10px] text-muted-foreground capitalize">
+                  {user.user_type.replace(/_/g, " ")}
+                </p>
+              </div>
+              <User className="ml-auto size-3.5 shrink-0 text-muted-foreground" />
+            </Link>
+          ) : (
+            <div className="flex items-center gap-2 px-2 py-1">
+              <div className="size-2 rounded-full bg-muted-foreground/40" />
+              <span className="text-[11px] text-muted-foreground">Guest session</span>
+            </div>
+          )}
+        </div>
       </div>
     </aside>
   );

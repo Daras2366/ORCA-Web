@@ -13,6 +13,7 @@ import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { LocationProvider } from "../hooks/useLocation";
 import { MapLocateProvider } from "../hooks/useMapLocate";
+import { AuthProvider } from "../hooks/useAuth";
 
 function NotFoundComponent() {
   return (
@@ -131,12 +132,14 @@ function RootComponent() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <LocationProvider>
-        <MapLocateProvider>
-          {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
-          <Outlet />
-        </MapLocateProvider>
-      </LocationProvider>
+      <AuthProvider>
+        <LocationProvider>
+          <MapLocateProvider>
+            {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
+            <Outlet />
+          </MapLocateProvider>
+        </LocationProvider>
+      </AuthProvider>
     </QueryClientProvider>
   );
 }

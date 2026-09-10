@@ -101,7 +101,7 @@ function AssistantMessageBody({ content }: { content: string }) {
             ) : numberedMatch ? (
               <div className="flex gap-2">
                 <span className="shrink-0">{numberedMatch[1]}.</span>
-                <span>{renderInlineMarkdown(numberedMatch[2])}</span>
+                <span>{renderInlineMarkdown(numberedMatch[2] ?? "")}</span>
               </div>
             ) : (
               <span>{renderInlineMarkdown(trimmed)}</span>

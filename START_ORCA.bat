@@ -34,6 +34,11 @@ timeout /t 2 /nobreak >nul
 echo Starting Route Agent on port 8004...
 start "ORCA Route Agent" cmd /k "cd /d %~dp0 && "%PYTHON%" -m uvicorn backend.api.route_api:app --reload --port 8004"
 
+timeout /t 2 /nobreak >nul
+
+echo Starting Auth API on port 8005...
+start "ORCA Auth API" cmd /k "cd /d %~dp0 && "%PYTHON%" -m uvicorn backend.auth.main:app --reload --port 8005"
+
 timeout /t 3 /nobreak >nul
 
 echo Starting Frontend...
@@ -62,7 +67,10 @@ echo.
 echo Routing API:
 echo http://localhost:8004
 echo.
+echo Auth API:
+echo http://localhost:8005
+echo.
 echo Keep the ORCA terminal windows open.
 echo ========================================
 
-pause
+pause

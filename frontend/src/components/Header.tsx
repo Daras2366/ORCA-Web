@@ -1,12 +1,17 @@
 import { useEffect, useState } from "react";
-import { MapPin, Menu, Navigation, Sun } from "lucide-react";
+import { LogIn, MapPin, Menu, Navigation, Sun } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { formatLocation, useLocationContext } from "@/hooks/useLocation";
+import { useAuth } from "@/hooks/useAuth";
+import { AuthModal } from "@/components/auth/AuthModal";
+import { UserMenu } from "@/components/auth/UserMenu";
 
 export function Header({ onOpenMenu }: { onOpenMenu?: () => void }) {
   const { location, setLocation, useBrowserLocation, detecting, error } = useLocationContext();
+  const { isAuthenticated, isLoading } = useAuth();
+  const [authOpen, setAuthOpen] = useState(false);
 
   const [latitude, setLatitude] = useState(String(location.latitude));
   const [longitude, setLongitude] = useState(String(location.longitude));
@@ -183,7 +188,27 @@ export function Header({ onOpenMenu }: { onOpenMenu?: () => void }) {
           <span className="size-2 rounded-full bg-safe" />
           Live Data
         </div>
+
+        {/* Auth — Sign In button for guests, UserMenu for authenticated users */}
+        {!isLoading && (
+          isAuthenticated ? (
+            <UserMenu />
+          ) : (
+            <Button
+              id="header-sign-in"
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              onClick={() => setAuthOpen(true)}
+            >
+              <LogIn className="size-4" />
+              Sign In
+            </Button>
+          )
+        )}
       </div>
+
+      <AuthModal open={authOpen} onOpenChange={setAuthOpen} />
     </header>
   );
 }
