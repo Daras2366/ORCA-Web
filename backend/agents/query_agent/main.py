@@ -1,7 +1,8 @@
 from fastapi import FastAPI, HTTPException, File, UploadFile
+from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from backend.agents.query_agent.schemas import QueryRequest
-from backend.gemini_client import ask_gemini, transcribe_audio
+from backend.gemini_client import ask_gemini, transcribe_audio, synthesize_speech
 from backend.agents.query_agent.gemini_planner import plan_query
 from backend.agents.query_agent.gemini_synthesizer import synthesize_answer
 
@@ -75,6 +76,44 @@ async def transcribe_voice(
             status_code=500,
             detail="Speech transcription failed.",
         )
+        
+@app.post("/synthesize")
+async def synthesize_voice(payload: dict):
+    """
+    Convert ORCA's text response into speech
+    using Gemini TTS.
+    """
+
+    text = payload.get("text", "")
+
+    if not isinstance(text, str) or not text.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="No text provided for speech.",
+        )
+
+    try:
+        audio_bytes = synthesize_speech(text)
+
+        return Response(
+            content=audio_bytes,
+            media_type="audio/wav",
+            headers={
+                "Cache-Control": "no-store",
+            },
+        )
+
+    except Exception as exc:
+        print(
+            "ORCA Gemini TTS error:",
+            exc,
+        )
+
+        raise HTTPException(
+            status_code=500,
+            detail="Speech synthesis failed.",
+        )
+        
 
 # ---------------------------------------------------------
 # Conversation context

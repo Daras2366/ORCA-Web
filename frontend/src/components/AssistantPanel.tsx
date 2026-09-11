@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Loader2, MapPin, Mic, MicOff, RotateCcw, Send } from "lucide-react";
+import { Loader2, MapPin, Mic, MicOff, RotateCcw, Send, Volume2, VolumeX } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { OrcaLogo } from "./OrcaLogo";
@@ -157,6 +157,8 @@ export function AssistantPanel() {
   const [error, setError] = useState<string | null>(null);
   const [isListening, setIsListening] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
+  const [ttsLoadingId, setTtsLoadingId] = useState<string | null>(null);
+  const [speakingId, setSpeakingId] = useState<string | null>(null);
 
   const voiceSupported =
     typeof window !== "undefined" &&
@@ -165,6 +167,8 @@ export function AssistantPanel() {
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioUrlRef = useRef<string | null>(null);
 
   const conversationId = useRef(createConversationId());
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -172,6 +176,16 @@ export function AssistantPanel() {
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, loading]);
+
+  useEffect(() => {
+    return () => {
+      audioRef.current?.pause();
+
+      if (audioUrlRef.current) {
+        URL.revokeObjectURL(audioUrlRef.current);
+      }
+    };
+  }, []);
 
   const transcribeAudio = async (audioBlob: Blob) => {
     setTranscribing(true);
@@ -206,6 +220,101 @@ export function AssistantPanel() {
       setError(err instanceof Error ? err.message : "Voice transcription failed.");
     } finally {
       setTranscribing(false);
+    }
+  };
+
+  const speakResponse = async (messageId: string, text: string) => {
+    // If this response is currently playing, stop it.
+    if (speakingId === messageId) {
+      audioRef.current?.pause();
+
+      if (audioUrlRef.current) {
+        URL.revokeObjectURL(audioUrlRef.current);
+        audioUrlRef.current = null;
+      }
+
+      audioRef.current = null;
+      setSpeakingId(null);
+      return;
+    }
+
+    // Stop any previous audio.
+    audioRef.current?.pause();
+
+    if (audioUrlRef.current) {
+      URL.revokeObjectURL(audioUrlRef.current);
+      audioUrlRef.current = null;
+    }
+
+    setTtsLoadingId(messageId);
+    setSpeakingId(null);
+    setError(null);
+
+    try {
+      const response = await fetch("http://127.0.0.1:8001/synthesize", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          text,
+        }),
+      });
+
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+
+        throw new Error(body?.detail || "Speech synthesis failed.");
+      }
+
+      const audioBlob = await response.blob();
+
+      if (!audioBlob.size) {
+        throw new Error("No audio was returned.");
+      }
+
+      const audioUrl = URL.createObjectURL(audioBlob);
+
+      audioUrlRef.current = audioUrl;
+
+      const audio = new Audio(audioUrl);
+
+      audioRef.current = audio;
+
+      audio.onended = () => {
+        setSpeakingId(null);
+
+        if (audioUrlRef.current) {
+          URL.revokeObjectURL(audioUrlRef.current);
+          audioUrlRef.current = null;
+        }
+
+        audioRef.current = null;
+      };
+
+      audio.onerror = () => {
+        setSpeakingId(null);
+        setError("Could not play the ORCA voice response.");
+
+        if (audioUrlRef.current) {
+          URL.revokeObjectURL(audioUrlRef.current);
+          audioUrlRef.current = null;
+        }
+
+        audioRef.current = null;
+      };
+
+      setTtsLoadingId(null);
+      setSpeakingId(messageId);
+
+      await audio.play();
+    } catch (err) {
+      console.error("ORCA TTS error:", err);
+
+      setTtsLoadingId(null);
+      setSpeakingId(null);
+
+      setError(err instanceof Error ? err.message : "Speech synthesis failed.");
     }
   };
 
@@ -405,8 +514,42 @@ export function AssistantPanel() {
             ) : (
               <div key={m.id} className="flex gap-2">
                 <OrcaLogo className="mt-0.5 size-5 shrink-0" />
+
                 <div className="max-w-[92%] text-sm leading-6 text-shell">
                   <AssistantMessageBody content={m.content} />
+
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="mt-1 h-7 gap-1.5 px-2 text-xs text-muted-foreground hover:text-shell"
+                    onClick={() => speakResponse(m.id, m.content)}
+                    disabled={ttsLoadingId !== null && ttsLoadingId !== m.id}
+                    title={
+                      speakingId === m.id
+                        ? "Stop speaking"
+                        : ttsLoadingId === m.id
+                          ? "Generating speech..."
+                          : "Listen to response"
+                    }
+                  >
+                    {ttsLoadingId === m.id ? (
+                      <>
+                        <Loader2 className="size-3.5 animate-spin" />
+                        Generating voice...
+                      </>
+                    ) : speakingId === m.id ? (
+                      <>
+                        <VolumeX className="size-3.5" />
+                        Stop
+                      </>
+                    ) : (
+                      <>
+                        <Volume2 className="size-3.5" />
+                        Listen
+                      </>
+                    )}
+                  </Button>
                 </div>
               </div>
             ),

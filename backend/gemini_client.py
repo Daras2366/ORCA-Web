@@ -1,5 +1,8 @@
+import base64
+import io
 import os
 import tempfile
+import wave
 
 from dotenv import load_dotenv
 from google import genai
@@ -194,3 +197,91 @@ should remain approximately:
                 os.remove(temp_path)
             except OSError:
                 pass
+            
+            
+def synthesize_speech(text: str) -> bytes:
+    """
+    Convert an ORCA assistant response into speech.
+
+    Uses Gemini 3.1 Flash TTS Preview and returns
+    a WAV audio file as bytes.
+    """
+
+    if not text or not text.strip():
+        raise ValueError("Text for speech is empty.")
+
+    speech_prompt = f"""
+You are the voice of ORCA, a marine intelligence assistant.
+
+Read the following assistant response aloud naturally.
+
+Requirements:
+- Speak clearly and naturally.
+- Preserve Hindi-English code-switching / Hinglish.
+- Do not translate Hindi into English.
+- Do not say markdown symbols aloud.
+- Do not say formatting instructions aloud.
+- Maintain a calm, professional and helpful tone.
+- Use natural pauses between different pieces of information.
+- Read numbers, coordinates, temperatures and measurements clearly.
+
+The text to speak begins below:
+
+{text}
+"""
+
+    response = client.models.generate_content(
+        model="gemini-3.1-flash-tts-preview",
+        contents=speech_prompt,
+        config=types.GenerateContentConfig(
+            response_modalities=["AUDIO"],
+            speech_config=types.SpeechConfig(
+                voice_config=types.VoiceConfig(
+                    prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                        voice_name="Kore",
+                    )
+                )
+            ),
+        ),
+    )
+
+    try:
+        audio_data = (
+            response
+            .candidates[0]
+            .content
+            .parts[0]
+            .inline_data
+            .data
+        )
+    except (AttributeError, IndexError, TypeError) as exc:
+        raise ValueError(
+            "Gemini TTS did not return audio data."
+        ) from exc
+
+    if not audio_data:
+        raise ValueError(
+            "Gemini TTS returned empty audio."
+        )
+
+    if isinstance(audio_data, str):
+        audio_data = base64.b64decode(audio_data)
+
+    # Gemini returns PCM audio.
+    # Wrap it in a WAV container so the browser can play it.
+    wav_buffer = io.BytesIO()
+
+    with wave.open(wav_buffer, "wb") as wav_file:
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(24000)
+        wav_file.writeframes(audio_data)
+        
+    wav_bytes = wav_buffer.getvalue()
+
+    print("ORCA TTS WAV size:", len(wav_bytes))
+    print("ORCA TTS WAV header:", wav_bytes[:12])
+
+    return wav_bytes
+
+    return wav_buffer.getvalue()
