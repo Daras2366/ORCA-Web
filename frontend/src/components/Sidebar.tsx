@@ -2,9 +2,9 @@ import { Link } from "@tanstack/react-router";
 import {
   Anchor,
   Bookmark,
+  BrainCircuit,
   CircleHelp,
   Fish,
-  History,
   LayoutDashboard,
   Settings,
   ShieldAlert,
@@ -24,7 +24,7 @@ const primaryNav = [
 
 const secondaryNav = [
   { to: "/saved-locations", label: "Saved Locations", icon: Bookmark },
-  { to: "/history", label: "History", icon: History },
+  { to: "/history", label: "Feedback", icon: BrainCircuit },
 ] as const;
 
 const tertiaryNav = [

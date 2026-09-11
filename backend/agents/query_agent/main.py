@@ -5,6 +5,7 @@ from backend.agents.query_agent.schemas import QueryRequest
 from backend.gemini_client import ask_gemini, transcribe_audio, synthesize_speech
 from backend.agents.query_agent.gemini_planner import plan_query
 from backend.agents.query_agent.gemini_synthesizer import synthesize_answer
+from backend.api.feedback_api import router as feedback_router
 
 import requests, pandas as pd, re, os
 from datetime import datetime, timedelta
@@ -25,6 +26,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Mount the feedback loop router (all endpoints live at /api/feedback/*)
+app.include_router(feedback_router)
 
 OCEAN_API = os.getenv("OCEAN_API", "http://localhost:8002")
 SAFETY_API = os.getenv("SAFETY_API", "http://localhost:8003")
