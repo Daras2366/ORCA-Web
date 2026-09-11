@@ -1,7 +1,7 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from backend.agents.query_agent.schemas import QueryRequest
-from backend.gemini_client import ask_gemini
+from backend.gemini_client import ask_gemini, transcribe_audio
 from backend.agents.query_agent.gemini_planner import plan_query
 from backend.agents.query_agent.gemini_synthesizer import synthesize_answer
 
@@ -29,6 +29,52 @@ OCEAN_API = os.getenv("OCEAN_API", "http://localhost:8002")
 SAFETY_API = os.getenv("SAFETY_API", "http://localhost:8003")
 ROUTE_API = os.getenv("ROUTE_API", "http://localhost:8004")
 DECISION_API = os.getenv("DECISION_API", "http://localhost:8000")
+
+
+@app.post("/transcribe")
+async def transcribe_voice(
+    file: UploadFile = File(...)
+):
+    """
+    Receive microphone audio from the frontend
+    and convert it to text using Gemini.
+    """
+
+    if not file.filename:
+        raise HTTPException(
+            status_code=400,
+            detail="No audio file provided.",
+        )
+
+    audio_bytes = await file.read()
+
+    if not audio_bytes:
+        raise HTTPException(
+            status_code=400,
+            detail="The audio file is empty.",
+        )
+
+    try:
+        text = transcribe_audio(
+            audio_bytes,
+            file.content_type or "audio/webm",
+        )
+
+        return {
+            "status": "success",
+            "text": text,
+        }
+
+    except Exception as exc:
+        print(
+            "ORCA Gemini transcription error:",
+            exc,
+        )
+
+        raise HTTPException(
+            status_code=500,
+            detail="Speech transcription failed.",
+        )
 
 # ---------------------------------------------------------
 # Conversation context

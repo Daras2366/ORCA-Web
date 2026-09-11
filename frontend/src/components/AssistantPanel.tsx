@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Loader2, MapPin, RotateCcw, Send } from "lucide-react";
+import { Loader2, MapPin, Mic, MicOff, RotateCcw, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { OrcaLogo } from "./OrcaLogo";
@@ -155,12 +155,173 @@ export function AssistantPanel() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isListening, setIsListening] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
+
+  const voiceSupported =
+    typeof window !== "undefined" &&
+    !!navigator.mediaDevices?.getUserMedia &&
+    typeof MediaRecorder !== "undefined";
+
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+
   const conversationId = useRef(createConversationId());
   const scrollRef = useRef<HTMLDivElement>(null);
-
+  
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, loading]);
+
+  const transcribeAudio = async (audioBlob: Blob) => {
+    setTranscribing(true);
+    setError(null);
+
+    try {
+      const formData = new FormData();
+
+      formData.append("file", audioBlob, "orca-voice.webm");
+
+      const response = await fetch("http://127.0.0.1:8001/transcribe", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+
+        throw new Error(body?.detail || "Voice transcription failed.");
+      }
+
+      const data = await response.json();
+
+      if (!data.text) {
+        throw new Error("No speech was detected.");
+      }
+
+      setInput(data.text);
+    } catch (err) {
+      console.error("ORCA transcription error:", err);
+
+      setError(err instanceof Error ? err.message : "Voice transcription failed.");
+    } finally {
+      setTranscribing(false);
+    }
+  };
+
+  const toggleVoiceInput = async () => {
+    if (loading || transcribing) {
+      return;
+    }
+
+    // If already recording, stop the recording.
+    if (isListening) {
+      mediaRecorderRef.current?.stop();
+      return;
+    }
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setError("Your browser does not support microphone recording.");
+      return;
+    }
+
+    if (!window.isSecureContext) {
+      setError("Voice input requires HTTPS or localhost.");
+      return;
+    }
+
+    try {
+      setError(null);
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+      });
+
+      const mimeTypes = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus"];
+
+      const supportedMimeType = mimeTypes.find((type) => MediaRecorder.isTypeSupported(type));
+
+      const recorder = supportedMimeType
+        ? new MediaRecorder(stream, {
+            mimeType: supportedMimeType,
+          })
+        : new MediaRecorder(stream);
+
+      audioChunksRef.current = [];
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      recorder.onstart = () => {
+        console.log("ORCA Voice: microphone recording started");
+
+        setIsListening(true);
+        setError(null);
+      };
+
+      recorder.onstop = async () => {
+        console.log("ORCA Voice: microphone recording stopped");
+
+        setIsListening(false);
+
+        // Stop microphone access.
+        stream.getTracks().forEach((track) => track.stop());
+
+        const audioBlob = new Blob(audioChunksRef.current, {
+          type: recorder.mimeType || "audio/webm",
+        });
+
+        audioChunksRef.current = [];
+
+        if (audioBlob.size === 0) {
+          setError("No audio was recorded.");
+          return;
+        }
+
+        await transcribeAudio(audioBlob);
+      };
+
+      recorder.onerror = () => {
+        console.error("ORCA Voice: MediaRecorder error");
+
+        setIsListening(false);
+
+        stream.getTracks().forEach((track) => track.stop());
+
+        setError("Microphone recording failed. Please try again.");
+      };
+
+      mediaRecorderRef.current = recorder;
+
+      recorder.start();
+    } catch (err) {
+      console.error("ORCA microphone error:", err);
+
+      setIsListening(false);
+
+      if (err instanceof DOMException) {
+        if (err.name === "NotAllowedError") {
+          setError("Microphone permission was denied. Please allow microphone access.");
+          return;
+        }
+
+        if (err.name === "NotFoundError") {
+          setError("No microphone was found.");
+          return;
+        }
+
+        if (err.name === "NotReadableError") {
+          setError("The microphone is being used by another application.");
+          return;
+        }
+      }
+
+      setError("Could not start microphone recording.");
+    }
+  };
 
   const send = async (text: string) => {
     const value = text.trim();
@@ -277,15 +438,58 @@ export function AssistantPanel() {
                 send(input);
               }
             }}
-            placeholder="Type your question..."
+            placeholder={
+              isListening
+                ? "Listening..."
+                : transcribing
+                  ? "Transcribing..."
+                  : "Type your question..."
+            }
             rows={2}
             className="min-h-[44px] resize-none bg-deep text-sm"
           />
-          <Button type="submit" size="icon" className="size-10 shrink-0" disabled={loading}>
+
+          {voiceSupported && (
+            <Button
+              type="button"
+              size="icon"
+              variant={isListening ? "default" : "outline"}
+              className="size-10 shrink-0"
+              onClick={toggleVoiceInput}
+              disabled={loading || transcribing}
+              title={
+                transcribing ? "Transcribing..." : isListening ? "Stop recording" : "Voice input"
+              }
+            >
+              {transcribing ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : isListening ? (
+                <MicOff className="size-4" />
+              ) : (
+                <Mic className="size-4" />
+              )}
+
+              <span className="sr-only">
+                {transcribing
+                  ? "Transcribing"
+                  : isListening
+                    ? "Stop voice recording"
+                    : "Start voice input"}
+              </span>
+            </Button>
+          )}
+
+          <Button
+            type="submit"
+            size="icon"
+            className="size-10 shrink-0"
+            disabled={loading || !input.trim()}
+          >
             <Send className="size-4" />
             <span className="sr-only">Send</span>
           </Button>
         </form>
+
         <p className="mt-2 flex items-center gap-1.5 text-[11px] text-muted-foreground">
           <MapPin className="size-3" />
           Using your location for more accurate results

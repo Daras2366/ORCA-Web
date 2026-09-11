@@ -36,7 +36,15 @@ export function MapLocateProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const registerZones = useCallback((zoneIds: string[]) => {
-    setAvailableZoneIds(new Set(zoneIds.map((id) => id.toUpperCase())));
+    const normalized = new Set(zoneIds.map((id) => id.toUpperCase()));
+
+    setAvailableZoneIds((prev) => {
+      if (prev.size === normalized.size && [...prev].every((id) => normalized.has(id))) {
+        return prev;
+      }
+
+      return normalized;
+    });
   }, []);
 
   const value = useMemo(
