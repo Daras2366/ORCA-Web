@@ -4,6 +4,8 @@ from pydantic import BaseModel
 import pandas as pd
 import numpy as np
 import os
+from backend.agents.safety_agent.live_marine_adapter import get_live_conditions
+
 
 # ---------------------------------------------------------
 # PATHS
@@ -188,6 +190,116 @@ def calculate_risk(row):
         float(sum(risks)),
         4
     )
+    
+def calculate_live_risk(data):
+
+    risks = []
+
+    wind_kmh = data.get("wind_speed_kmh")
+    wave = data.get("wave_height_m")
+    rainfall = data.get("precipitation_mm")
+
+    # --------------------------------------------------
+    # WIND
+    # --------------------------------------------------
+
+    if wind_kmh is not None:
+
+        wind_ms = wind_kmh / 3.6
+
+        wind_risk = np.clip(
+            wind_ms / 15,
+            0,
+            1
+        )
+
+        risks.append(
+            wind_risk * 0.30
+        )
+
+    # --------------------------------------------------
+    # WAVES
+    # --------------------------------------------------
+
+    if wave is not None:
+
+        wave_risk = np.clip(
+            wave / 4,
+            0,
+            1
+        )
+
+        risks.append(
+            wave_risk * 0.30
+        )
+
+    # --------------------------------------------------
+    # RAIN
+    # --------------------------------------------------
+
+    if rainfall is not None:
+
+        rainfall_risk = np.clip(
+            rainfall / 10,
+            0,
+            1
+        )
+
+        risks.append(
+            rainfall_risk * 0.10
+        )
+
+    # --------------------------------------------------
+    # CURRENT
+    # --------------------------------------------------
+
+    current = data.get("current_speed_ms")
+
+    if current is not None:
+
+        current_risk = np.clip(
+            current / 2,
+            0,
+            1
+        )
+
+        risks.append(
+            current_risk * 0.15
+        )
+
+    # --------------------------------------------------
+    # SST
+    # --------------------------------------------------
+
+    # SST is intentionally NOT used as a direct
+    # safety risk factor here.
+    #
+    # It belongs primarily to the Ocean/Fishing Agent.
+
+    if not risks:
+        return None
+
+    used_weight = 0.0
+
+    if wind_kmh is not None:
+        used_weight += 0.30
+
+    if wave is not None:
+        used_weight += 0.30
+
+    if rainfall is not None:
+        used_weight += 0.10
+
+    if current is not None:
+        used_weight += 0.15
+
+    if used_weight == 0:
+        return None
+
+    return round(
+        float(sum(risks) / used_weight),
+        4
+    )
 
 
 # ---------------------------------------------------------
@@ -254,98 +366,126 @@ def home():
 @app.post("/safety/analyze")
 def analyze_safety(request: SafetyRequest):
 
-    zone_id = request.zone_id.strip()
+    latitude = request.latitude
+    longitude = request.longitude
 
-    rows = df[
-        df["zone_id"]
-        .astype(str)
-        .str.upper()
-        == zone_id.upper()
-    ]
+    zone_id = request.zone_id.strip() if request.zone_id else None
 
-    if rows.empty:
+    # --------------------------------------------------
+    # If coordinates were not supplied, get them from
+    # the historical PFZ dataset.
+    #
+    # The coordinates are only being used to locate the
+    # requested zone. The actual safety conditions below
+    # come from the live API.
+    # --------------------------------------------------
 
-        raise HTTPException(
-            status_code=404,
-            detail=f"Zone {zone_id} not found"
+    if latitude is None or longitude is None:
+
+        if not zone_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Provide zone_id or latitude and longitude"
+            )
+
+        rows = df[
+            df["zone_id"]
+            .astype(str)
+            .str.upper()
+            == zone_id.upper()
+        ]
+
+        if rows.empty:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Zone {zone_id} not found"
+            )
+
+        row = rows.iloc[0]
+
+        latitude = float(row["latitude"])
+        longitude = float(row["longitude"])
+
+    # --------------------------------------------------
+    # LIVE DATA
+    # --------------------------------------------------
+
+    try:
+
+        live = get_live_conditions(
+            latitude,
+            longitude
         )
 
-    row = rows.iloc[0]
+    except Exception as e:
 
-    risk_score = calculate_risk(row)
+        raise HTTPException(
+            status_code=502,
+            detail=f"Live marine data unavailable: {str(e)}"
+        )
+
+    # --------------------------------------------------
+    # LIVE RISK
+    # --------------------------------------------------
+
+    risk_score = calculate_live_risk(live)
 
     risk_level = get_risk_level(
         risk_score
     )
 
+    # --------------------------------------------------
+    # RESPONSE
+    # --------------------------------------------------
+
     return {
 
         "agent": "Safety Agent",
-
         "status": "success",
-
-        "mode": "current",
-
-        "zone_id": str(
-            row["zone_id"]
-        ),
-
+        "mode": "live",
+        "data_source": live.get("source"),
+        "timestamp": live.get("timestamp"),
+        
+        "zone_id": zone_id,
+        "location": {
+            "latitude": latitude,
+            "longitude": longitude
+        },
+        
         "risk_score": risk_score,
-
         "risk_level": risk_level,
-
+        
         "evidence": {
+            "wind_speed_ms": (
+                live["wind_speed_kmh"] / 3.6
+                if live.get("wind_speed_kmh") is not None
+                else None
+            ),
 
-            "wind_speed_ms":
-                get_value(
-                    row,
-                    "wind_speed_ms"
-                ),
+            "wind_direction_deg":
+                live.get("wind_direction_deg"),
 
             "wave_height_m":
-                get_value(
-                    row,
-                    "wave_height_m"
-                ),
+                live.get("wave_height_m"),
 
             "wave_period_s":
-                get_value(
-                    row,
-                    "wave_period_s"
-                ),
+                live.get("wave_period_s"),
 
             "wave_direction_deg":
-                get_value(
-                    row,
-                    "wave_direction_deg"
-                ),
-
-            "cyclone_distance_km":
-                get_value(
-                    row,
-                    "cyclone_distance_km"
-                ),
-
-            "cyclone_wind_kt":
-                get_value(
-                    row,
-                    "cyclone_wind_kt"
-                ),
+                live.get("wave_direction_deg"),
 
             "rainfall_mean":
-                get_value(
-                    row,
-                    "rainfall_mean"
-                ),
+                live.get("precipitation_mm"),
 
             "current_speed_ms":
-                get_value(
-                    row,
-                    "current_speed_ms"
-                )
+                live.get("current_speed_ms"),
 
+            "current_direction_deg":
+                live.get("current_direction_deg"),
+
+            "sst_c":
+                live.get("sst_c")
         }
-
     }
 
 # ---------------------------------------------------------

@@ -5,6 +5,10 @@ import pandas as pd
 import numpy as np
 import os
 
+from backend.agents.ocean_agent.live_ocean_adapter import get_live_ocean
+from backend.agents.ocean_agent.chlorophyll_adapter import get_chlorophyll
+
+
 app = FastAPI(title="ORCA Ocean Agent API")
 
 app.add_middleware(
@@ -33,7 +37,9 @@ print(f"Ocean dataset loaded: {len(df)} rows")
 
 
 class OceanRequest(BaseModel):
-    zone_id: str
+    zone_id: str | None = None
+    latitude: float | None = None
+    longitude: float | None = None
 
 
 def value(row, *names):
@@ -51,47 +57,43 @@ def normalize(x, low, high):
     return float(np.clip((x - low) / (high - low), 0, 1))
 
 
-def calculate_hsi(row):
-    chl = value(row, "chlorophyll_mean", "chlorophyll")
-    sst = value(row, "sst_c", "sst", "sea_surface_temperature")
-    current = value(row, "current_speed_ms", "current_speed")
-
+def calculate_hsi(
+    chlorophyll,
+    sst,
+    current
+):
     components = []
     weights = []
 
-    # Chlorophyll HSI
-    if chl is not None:
-        chl_score = normalize(chl, 0.05, 0.50)
+    if chlorophyll is not None:
+        chl_score = normalize(chlorophyll, 0.05, 0.50)
+        
         components.append(chl_score)
         weights.append(0.40)
+
     else:
         chl_score = None
 
-    # SST HSI
     if sst is not None:
         sst_score = float(
-            np.clip(
-                1 - abs(sst - 28.0) / 5.0,
-                0,
-                1
-            )
+            np.clip(1 - abs(sst - 28.0) / 5.0, 0, 1)
         )
+
         components.append(sst_score)
         weights.append(0.30)
+
     else:
         sst_score = None
 
-    # Current HSI
+
     if current is not None:
         current_score = float(
-            np.clip(
-                1 - abs(current - 0.5) / 0.5,
-                0,
-                1
-            )
+            np.clip(1 - abs(current - 0.5) / 0.5, 0, 1)
         )
+
         components.append(current_score)
         weights.append(0.30)
+
     else:
         current_score = None
 
@@ -105,12 +107,27 @@ def calculate_hsi(row):
     weights = np.array(weights)
     weights = weights / weights.sum()
 
-    fishing_score = float(np.sum(np.array(components) * weights))
+    fishing_score = float(
+        np.sum(
+            np.array(components) * weights
+        )
+    )
 
     return round(fishing_score, 4), {
-        "chlorophyll_hsi": None if chl_score is None else round(chl_score, 4),
-        "sst_hsi": None if sst_score is None else round(sst_score, 4),
-        "current_hsi": None if current_score is None else round(current_score, 4)
+        "chlorophyll_hsi":
+            None
+            if chl_score is None
+            else round(chl_score, 4),
+
+        "sst_hsi":
+            None
+            if sst_score is None
+            else round(sst_score, 4),
+
+        "current_hsi":
+            None
+            if current_score is None
+            else round(current_score, 4)
     }
 
 
@@ -126,52 +143,170 @@ def home():
 @app.post("/ocean/analyze")
 def analyze_ocean(request: OceanRequest):
 
-    zone_id = request.zone_id.strip()
+    latitude = request.latitude
+    longitude = request.longitude
+    zone_id = request.zone_id   
 
-    rows = df[
-        df["zone_id"].astype(str).str.upper() == zone_id.upper()
-    ]
+    # --------------------------------------------------
+    # RESOLVE HISTORICAL/PFZ ROW
+    # --------------------------------------------------
+    row = None
 
-    if rows.empty:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Zone {zone_id} not found"
+    if zone_id:
+        rows = df[
+            df["zone_id"]
+            .astype(str)
+            .str.upper()
+            == zone_id.upper()
+        ]
+
+        if not rows.empty:
+            row = rows.iloc[0]
+
+    # --------------------------------------------------
+    # RESOLVE COORDINATES
+    # --------------------------------------------------
+    if latitude is None or longitude is None:
+        if row is None:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Provide a valid zone_id or "
+                    "latitude and longitude"
+                )
+            )
+
+        latitude = float(row["latitude"])
+        longitude = float(row["longitude"])
+
+    # --------------------------------------------------
+    # LIVE OCEAN DATA
+    # --------------------------------------------------
+    try:
+        live = get_live_ocean(
+            latitude,
+            longitude
         )
 
-    row = rows.iloc[0]
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "Live ocean data unavailable: "
+                f"{str(e)}"
+            )
+        )
 
-    fishing_score, hsi = calculate_hsi(row)
+    # --------------------------------------------------
+    # NEAR-REAL-TIME CHLOROPHYLL
+    # --------------------------------------------------
+    try:
+        chlorophyll_data = get_chlorophyll(
+            latitude,
+            longitude
+        )
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "Chlorophyll data unavailable: "
+                f"{str(e)}"
+            )
+        )
+
+    chlorophyll = chlorophyll_data.get(
+        "chlorophyll_mean"
+    )
+
+    # --------------------------------------------------
+    # LIVE SST
+    # --------------------------------------------------
+    sst = live.get(
+        "sst_c"
+    )
+
+    # --------------------------------------------------
+    # LIVE OCEAN CURRENT
+    # --------------------------------------------------
+    current = live.get(
+        "current_speed_ms"
+    )
+
+    # --------------------------------------------------
+    # CALCULATE HSI
+    # --------------------------------------------------
+    fishing_score, hsi = calculate_hsi(
+        chlorophyll=chlorophyll,
+        sst=sst,
+        current=current
+    )
+
+    # --------------------------------------------------
+    # PFZ DISTANCE
+    # --------------------------------------------------
+    pfz_distance = None
+
+    if row is not None:
+        pfz_distance = value(
+            row,
+            "pfz_distance_km",
+            "distance_km"
+        )
+
+    # --------------------------------------------------
+    # RESPONSE
+    # --------------------------------------------------
 
     return {
         "agent": "Ocean Agent",
         "status": "success",
-        "zone_id": str(row["zone_id"]),
+        "data_mode": "mixed",
+        "timestamp": live.get("timestamp"),
+
+        "data_sources": {
+            "sst": "Open-Meteo",
+            "ocean_current": "Open-Meteo",
+            "wave": "Open-Meteo",
+            "chlorophyll": chlorophyll_data.get("source")
+        },
+
+        "data_modes": {
+            "sst": "live",
+            "ocean_current": "live",
+            "wave": "live",
+            "chlorophyll": chlorophyll_data.get("data_mode")
+
+        },
+
+        "zone_id": zone_id,
 
         "location": {
-            "latitude": value(row, "latitude"),
-            "longitude": value(row, "longitude")
+            "latitude": latitude,
+            "longitude": longitude
         },
 
         "fishing_score": fishing_score,
-
         "hsi_components": hsi,
 
         "evidence": {
-            "sst_c": value(row, "sst_c", "sst"),
-            "chlorophyll_mean": value(
-                row,
-                "chlorophyll_mean",
-                "chlorophyll"
-            ),
-            "current_speed_ms": value(
-                row,
-                "current_speed_ms",
-                "current_speed"
-            ),
-            "pfz_distance_km": value(
-                row,
-                "pfz_distance_km",
-                "distance_km"
-            )
+            # ------------------------------------------
+            # LIVE
+            # -----------------------------------------
+            "sst_c": live.get("sst_c"),
+            "current_speed_ms": live.get("current_speed_ms"),
+            "current_direction_deg": live.get("current_direction_deg"),
+            "wave_height_m": live.get("wave_height_m"),
+            "wave_period_s": live.get("wave_period_s"),
+            "wave_direction_deg": live.get("wave_direction_deg"),
+
+            # ------------------------------------------
+            # CHLOROPHYLL
+            # ------------------------------------------
+            "chlorophyll_mean": chlorophyll,
+            "chlorophyll_timestamp": chlorophyll_data.get("timestamp"),
+            "chlorophyll_source": chlorophyll_data.get("source"),
+            "chlorophyll_data_mode": chlorophyll_data.get("data_mode"),
+            "pfz_distance_km": pfz_distance
         }
     }

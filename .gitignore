@@ -21,6 +21,9 @@ dist/
 build/
 wheels/
 
+# Copernicus runtime cache
+copernicus_cache/
+
 # =========================
 # Environment / Secrets
 # =========================

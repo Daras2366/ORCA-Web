@@ -370,11 +370,38 @@ def call(url,payload,timeout=5):
         return r.json()
     except Exception as e:return {"status":"error","message":str(e)}
 
-def ocean(z): return call(f"{OCEAN_API}/ocean/analyze",{"zone_id":z})
-def safety(z): return call(f"{SAFETY_API}/safety/analyze",{"zone_id":z})
-def route(z): return call(f"{ROUTE_API}/route/analyze",{"zone_id":z})
-def forecast(z): return call(f"{SAFETY_API}/safety/forecast",{"zone_id":z},60)
-def safest_time(z): return call(f"{SAFETY_API}/safety/safest-time",{"zone_id":z},60)
+def ocean(z):
+    return call(
+        f"{OCEAN_API}/ocean/analyze",
+        {"zone_id": z},
+        30
+    )
+
+def safety(z):
+    return call(
+        f"{SAFETY_API}/safety/analyze",
+        {"zone_id": z}
+    )
+
+def route(z):
+    return call(
+        f"{ROUTE_API}/route/analyze",
+        {"zone_id": z}
+    )
+
+def forecast(z):
+    return call(
+        f"{SAFETY_API}/safety/forecast",
+        {"zone_id": z},
+        60
+    )
+
+def safest_time(z):
+    return call(
+        f"{SAFETY_API}/safety/safest-time",
+        {"zone_id": z},
+        60
+    )
 
 def parse(q):
     t=q.lower().strip()
