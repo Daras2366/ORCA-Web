@@ -70,10 +70,6 @@ export function QuickRouteEstimate({ data, loading, error }: Props) {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Route estimate details</DialogTitle>
-            <DialogDescription>
-              This is a straight-line estimate between your location and {data?.to_label}. It is not
-              navigation-grade route geometry and does not provide turn-by-turn guidance.
-            </DialogDescription>
           </DialogHeader>
           <ul className="space-y-2 text-sm text-shell">
             <li>Distance: {data?.distance_km} km</li>

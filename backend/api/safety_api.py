@@ -4,12 +4,15 @@ from pydantic import BaseModel
 import pandas as pd
 import numpy as np
 import os
-from backend.agents.safety_agent.live_marine_adapter import get_live_conditions
 
+from backend.agents.safety_agent.live_marine_adapter import get_live_conditions, get_live_conditions_bulk
+from backend.agents.safety_agent.forecast_adapter import (
+    get_tomorrow_forecast,
+    calculate_forecast_safety,
+    get_safest_time
+)
+from backend.agents.safety_agent.cyclone_adapter import get_cyclone_risk
 
-# ---------------------------------------------------------
-# PATHS
-# ---------------------------------------------------------
 
 BASE_DIR = os.path.dirname(
     os.path.dirname(os.path.abspath(__file__))
@@ -21,17 +24,6 @@ DATA_PATH = os.path.join(
     "safety",
     "unified_safety.csv"
 )
-
-from backend.agents.safety_agent.forecast_adapter import (
-    get_tomorrow_forecast,
-    calculate_forecast_safety,
-    get_safest_time
-)
-
-
-# ---------------------------------------------------------
-# APP
-# ---------------------------------------------------------
 
 app = FastAPI(
     title="ORCA Safety Agent API"
@@ -49,25 +41,18 @@ app.add_middleware(
 # ---------------------------------------------------------
 # LOAD DATA
 # ---------------------------------------------------------
-
 df = pd.read_csv(DATA_PATH)
-
 df.columns = df.columns.str.strip()
-
-print(
-    f"Safety dataset loaded: {len(df)} rows"
-)
+print(f"Safety dataset loaded: {len(df)} rows")
 
 
 # ---------------------------------------------------------
 # REQUEST SCHEMAS
 # ---------------------------------------------------------
-
 class SafetyRequest(BaseModel):
     zone_id: str
     latitude: float | None = None
     longitude: float | None = None
-
 
 class ForecastRequest(BaseModel):
     zone_id: str | None = None
@@ -78,17 +63,12 @@ class ForecastRequest(BaseModel):
 # ---------------------------------------------------------
 # HELPER
 # ---------------------------------------------------------
-
 def get_value(row, *names):
-
     for name in names:
-
         if name in df.columns:
-
             x = row[name]
 
             if pd.notna(x):
-
                 return float(x)
 
     return None
@@ -97,9 +77,7 @@ def get_value(row, *names):
 # ---------------------------------------------------------
 # STATIC RISK CALCULATION
 # ---------------------------------------------------------
-
 def calculate_risk(row):
-
     risks = []
 
     wind = get_value(
@@ -128,34 +106,18 @@ def calculate_risk(row):
     )
 
     if wind is not None:
-
         risks.append(
-            np.clip(
-                wind / 15,
-                0,
-                1
-            ) * 0.25
+            np.clip(wind / 15, 0, 1) * 0.25
         )
 
     if wave is not None:
-
         risks.append(
-            np.clip(
-                wave / 4,
-                0,
-                1
-            ) * 0.25
+            np.clip(wave / 4, 0, 1) * 0.25
         )
 
     if cyclone_dist is not None:
-
         cyclone_risk = (
-            1 -
-            np.clip(
-                cyclone_dist / 500,
-                0,
-                1
-            )
+            1 - np.clip(cyclone_dist / 500, 0, 1)
         )
 
         risks.append(
@@ -163,209 +125,90 @@ def calculate_risk(row):
         )
 
     if cyclone_wind is not None:
-
         risks.append(
-            np.clip(
-                cyclone_wind / 80,
-                0,
-                1
-            ) * 0.15
+            np.clip(cyclone_wind / 80, 0, 1) * 0.15
         )
 
     if rainfall is not None:
-
         risks.append(
-            np.clip(
-                rainfall / 10,
-                0,
-                1
-            ) * 0.10
+            np.clip(rainfall / 10, 0, 1) * 0.10
         )
 
     if not risks:
-
         return None
 
-    return round(
-        float(sum(risks)),
-        4
-    )
+    return round(float(sum(risks)), 4)
     
 def calculate_live_risk(data):
-
-    risks = []
-
+    contributions = []
     wind_kmh = data.get("wind_speed_kmh")
     wave = data.get("wave_height_m")
     rainfall = data.get("precipitation_mm")
-
-    # --------------------------------------------------
-    # WIND
-    # --------------------------------------------------
-
-    if wind_kmh is not None:
-
-        wind_ms = wind_kmh / 3.6
-
-        wind_risk = np.clip(
-            wind_ms / 15,
-            0,
-            1
-        )
-
-        risks.append(
-            wind_risk * 0.30
-        )
-
-    # --------------------------------------------------
-    # WAVES
-    # --------------------------------------------------
-
-    if wave is not None:
-
-        wave_risk = np.clip(
-            wave / 4,
-            0,
-            1
-        )
-
-        risks.append(
-            wave_risk * 0.30
-        )
-
-    # --------------------------------------------------
-    # RAIN
-    # --------------------------------------------------
-
-    if rainfall is not None:
-
-        rainfall_risk = np.clip(
-            rainfall / 10,
-            0,
-            1
-        )
-
-        risks.append(
-            rainfall_risk * 0.10
-        )
-
-    # --------------------------------------------------
-    # CURRENT
-    # --------------------------------------------------
-
     current = data.get("current_speed_ms")
 
-    if current is not None:
-
-        current_risk = np.clip(
-            current / 2,
-            0,
-            1
-        )
-
-        risks.append(
-            current_risk * 0.15
-        )
-
-    # --------------------------------------------------
-    # SST
-    # --------------------------------------------------
-
-    # SST is intentionally NOT used as a direct
-    # safety risk factor here.
-    #
-    # It belongs primarily to the Ocean/Fishing Agent.
-
-    if not risks:
-        return None
-
-    used_weight = 0.0
-
     if wind_kmh is not None:
-        used_weight += 0.30
-
+        contributions.append(np.clip((wind_kmh / 3.6) / 15, 0, 1) * 0.25)
     if wave is not None:
-        used_weight += 0.30
-
+        contributions.append(np.clip(wave / 4, 0, 1) * 0.25)
     if rainfall is not None:
-        used_weight += 0.10
-
+        contributions.append(np.clip(rainfall / 10, 0, 1) * 0.10)
     if current is not None:
-        used_weight += 0.15
+        contributions.append(np.clip(current / 2, 0, 1) * 0.15)
 
-    if used_weight == 0:
+    cyclone = data.get("cyclone")
+    if cyclone and cyclone.get("available"):
+        contributions.append(float(cyclone.get("risk", 0)) * 0.15)
+
+    if not contributions:
         return None
 
-    return round(
-        float(sum(risks) / used_weight),
-        4
-    )
+    total_weight = 0.90 if cyclone and cyclone.get("available") else 0.75
+    return round(float(sum(contributions) / total_weight), 4)
 
 
 # ---------------------------------------------------------
 # RISK LEVEL
 # ---------------------------------------------------------
-
 def get_risk_level(risk_score):
-
     if risk_score is None:
-
         return "UNKNOWN"
 
     if risk_score <= 0.40:
-
         return "LOW"
 
     elif risk_score <= 0.70:
-
         return "MODERATE"
 
     else:
-
         return "HIGH"
 
 
 # ---------------------------------------------------------
 # HOME
 # ---------------------------------------------------------
-
 @app.get("/")
 def home():
-
     return {
-
         "agent": "Safety Agent",
-
         "status": "running",
-
         "rows": len(df),
 
         "features": [
-
             "current_safety",
-
             "tomorrow_forecast",
-
             "safest_time",
-
             "wave_forecast",
-
             "wind_forecast",
-
             "rainfall_forecast"
-
         ]
-
     }
 
 
 # ---------------------------------------------------------
 # CURRENT / STATIC SAFETY
 # ---------------------------------------------------------
-
 @app.post("/safety/analyze")
 def analyze_safety(request: SafetyRequest):
-
     latitude = request.latitude
     longitude = request.longitude
 
@@ -381,7 +224,6 @@ def analyze_safety(request: SafetyRequest):
     # --------------------------------------------------
 
     if latitude is None or longitude is None:
-
         if not zone_id:
             raise HTTPException(
                 status_code=400,
@@ -409,37 +251,32 @@ def analyze_safety(request: SafetyRequest):
     # --------------------------------------------------
     # LIVE DATA
     # --------------------------------------------------
-
     try:
-
         live = get_live_conditions(
+            latitude,
+            longitude
+        )
+        live["cyclone"] = get_cyclone_risk(
             latitude,
             longitude
         )
 
     except Exception as e:
-
         raise HTTPException(
             status_code=502,
-            detail=f"Live marine data unavailable: {str(e)}"
+            detail=f"Live safety data unavailable: {str(e)}"
         )
 
     # --------------------------------------------------
     # LIVE RISK
     # --------------------------------------------------
-
     risk_score = calculate_live_risk(live)
-
-    risk_level = get_risk_level(
-        risk_score
-    )
+    risk_level = get_risk_level(risk_score)
 
     # --------------------------------------------------
     # RESPONSE
     # --------------------------------------------------
-
     return {
-
         "agent": "Safety Agent",
         "status": "success",
         "mode": "live",
@@ -484,22 +321,30 @@ def analyze_safety(request: SafetyRequest):
                 live.get("current_direction_deg"),
 
             "sst_c":
-                live.get("sst_c")
+                live.get("sst_c"),
+                
+            "cyclone":
+                live.get("cyclone")
         }
     }
 
 # ---------------------------------------------------------
 # CURRENT SAFETY RANKING FOR ALL PFZ ZONES
 # ---------------------------------------------------------
-
 @app.get("/safety/ranking")
 def safety_ranking():
+    """
+    Rank PFZ zones using LIVE marine/weather conditions.
 
-    # Prefer actual PFZ observations
-    if "pfz_label" in df.columns:
-        rows = df[df["pfz_label"] == 1].copy()
-    else:
-        rows = df.copy()
+    The static safety CSV is used only as a fallback if
+    live retrieval fails.
+    """
+
+    # --------------------------------------------------
+    # GET PFZ CANDIDATES
+    # --------------------------------------------------
+    zone_ids = df["zone_id"].astype(str).str.upper()
+    rows = df[zone_ids.str.startswith("PFZ")].copy()
 
     if rows.empty:
         raise HTTPException(
@@ -507,25 +352,138 @@ def safety_ranking():
             detail="No PFZ zones available"
         )
 
+    # --------------------------------------------------
+    # PREPARE LIVE REQUEST
+    # --------------------------------------------------
+    points = []
+
+    for _, row in rows.iterrows():
+        try:
+            points.append({
+                "zone_id": str(row["zone_id"]),
+                "latitude": float(row["latitude"]),
+                "longitude": float(row["longitude"]),
+            })
+
+        except Exception:
+            continue
+
+    # --------------------------------------------------
+    # TRY LIVE DATA
+    # --------------------------------------------------
+    live_data = {}
+    live_error = None
+
+    try:
+        live_data = get_live_conditions_bulk(
+            points
+        )
+
+    except Exception as e:
+        live_error = str(e)
+
+        print(
+            "[SAFETY] Live ranking failed:",
+            e
+        )
+
+    # --------------------------------------------------
+    # BUILD RESULTS
+    # --------------------------------------------------
     results = []
 
     for _, row in rows.iterrows():
+        zone_id = str(
+            row["zone_id"]
+        ).upper()
 
-        risk_score = calculate_risk(row)
-        risk_level = get_risk_level(risk_score)
+        live = live_data.get(zone_id)
 
-        results.append({
-            "zone_id": str(row["zone_id"]),
-            "risk_score": risk_score,
-            "risk_level": risk_level,
-            "safety_score": (
+        # ==================================================
+        # LIVE SCORE
+        # ==================================================
+        if live:
+            risk_score = calculate_live_risk(live)
+            risk_level = get_risk_level(risk_score)
+
+            safety_score = (
                 round(1 - risk_score, 4)
                 if risk_score is not None
                 else None
             )
+
+            results.append({
+                "zone_id": zone_id,
+                
+                "risk_score": risk_score,
+                "risk_level": risk_level,
+                "safety_score": safety_score,
+                
+                "data_mode": "live",
+                "data_source": "Open-Meteo",
+                "timestamp": live.get("timestamp"),
+
+                "evidence": {
+                    "wind_speed_ms":
+                        (
+                            live["wind_speed_kmh"] / 3.6
+                            if live.get(
+                                "wind_speed_kmh"
+                            ) is not None
+                            else None
+                        ),
+
+                    "wave_height_m":
+                        live.get("wave_height_m"),
+
+                    "wave_period_s":
+                        live.get("wave_period_s"),
+
+                    "rainfall_mm":
+                        live.get("precipitation_mm"),
+
+                    "current_speed_ms":
+                        live.get("current_speed_ms"),
+                        
+                    "cyclone":
+                        live.get("cyclone")
+                }
+            })
+
+            continue
+
+        # ==================================================
+        # STATIC FALLBACK
+        # ==================================================
+        fallback_risk = calculate_risk(row)
+        fallback_level = get_risk_level(fallback_risk)
+
+        results.append({
+            "zone_id": zone_id,
+            "risk_score": fallback_risk,
+            "risk_level": fallback_level,
+
+            "safety_score":
+                (
+                    round(1 - fallback_risk, 4)
+                    
+                    if fallback_risk is not None
+                    else None
+                ),
+                
+            "data_mode": "fallback",
+            "data_source": "ORCA static safety dataset",
+            "timestamp": None,
+            "evidence": {},
+
+            "fallback_reason":
+                live_error
+                or "Live data unavailable for this zone",
         })
 
-    # Highest risk first
+    # --------------------------------------------------
+    # SORT
+    # --------------------------------------------------
     results.sort(
         key=lambda x: (
             x["risk_score"]
@@ -538,19 +496,29 @@ def safety_ranking():
     return {
         "agent": "Safety Agent",
         "status": "success",
-        "mode": "current_ranking",
-        "zones": results
+        "mode": "live_first",
+        "zones": results,
+
+        "live_zone_count":
+            sum(
+                1
+                for x in results
+                if x["data_mode"] == "live"
+            ),
+
+        "fallback_zone_count":
+            sum(
+                1
+                for x in results
+                if x["data_mode"] == "fallback"
+            )
     }
 
 # ---------------------------------------------------------
 # TOMORROW FORECAST
 # ---------------------------------------------------------
-
 @app.post("/safety/forecast")
-def safety_forecast(
-    request: ForecastRequest
-):
-
+def safety_forecast(request: ForecastRequest):
     latitude = request.latitude
     longitude = request.longitude
     zone_id = request.zone_id
@@ -559,9 +527,7 @@ def safety_forecast(
     # If zone_id is supplied, get coordinates
     # from Safety dataset
     # ---------------------------------------------
-
     if zone_id:
-
         rows = df[
             df["zone_id"]
             .astype(str)
@@ -570,7 +536,6 @@ def safety_forecast(
         ]
 
         if rows.empty:
-
             raise HTTPException(
                 status_code=404,
                 detail=f"Zone {zone_id} not found"
@@ -579,13 +544,11 @@ def safety_forecast(
         row = rows.iloc[0]
 
         if latitude is None:
-
             latitude = float(
                 row["latitude"]
             )
 
         if longitude is None:
-
             longitude = float(
                 row["longitude"]
             )
@@ -593,9 +556,7 @@ def safety_forecast(
     # ---------------------------------------------
     # Coordinates are mandatory
     # ---------------------------------------------
-
     if latitude is None or longitude is None:
-
         raise HTTPException(
             status_code=400,
             detail=(
@@ -607,23 +568,19 @@ def safety_forecast(
     # ---------------------------------------------
     # Get hourly forecast
     # ---------------------------------------------
-
     try:
-
         forecast = get_tomorrow_forecast(
             latitude,
             longitude
         )
 
     except Exception as e:
-
         raise HTTPException(
             status_code=502,
             detail=f"Forecast API error: {str(e)}"
         )
 
     if not forecast:
-
         raise HTTPException(
             status_code=404,
             detail="No forecast data available"
@@ -632,56 +589,35 @@ def safety_forecast(
     # ---------------------------------------------
     # Calculate hourly safety
     # ---------------------------------------------
-
-    scored = calculate_forecast_safety(
-        forecast
-    )
+    scored = calculate_forecast_safety(forecast)
 
     # ---------------------------------------------
     # Safest hour
     # ---------------------------------------------
-
-    safest, _ = get_safest_time(
-        forecast
-    )
+    safest, _ = get_safest_time(forecast)
 
     return {
-
         "agent": "Safety Agent",
-
         "status": "success",
-
         "mode": "tomorrow_forecast",
-
         "zone_id": zone_id,
 
         "location": {
-
             "latitude": latitude,
-
             "longitude": longitude
-
         },
 
-        "forecast_date":
-            scored[0]["time"][:10],
-
+        "forecast_date": scored[0]["time"][:10],
         "safest_time": safest,
-
         "hourly_forecast": scored
-
     }
 
 
 # ---------------------------------------------------------
 # SAFEST TIME ONLY
 # ---------------------------------------------------------
-
 @app.post("/safety/safest-time")
-def safest_time(
-    request: ForecastRequest
-):
-
+def safest_time(request: ForecastRequest):
     latitude = request.latitude
     longitude = request.longitude
     zone_id = request.zone_id
@@ -689,9 +625,7 @@ def safest_time(
     # ---------------------------------------------
     # Resolve zone coordinates
     # ---------------------------------------------
-
     if zone_id:
-
         rows = df[
             df["zone_id"]
             .astype(str)
@@ -700,7 +634,6 @@ def safest_time(
         ]
 
         if rows.empty:
-
             raise HTTPException(
                 status_code=404,
                 detail=f"Zone {zone_id} not found"
@@ -721,7 +654,6 @@ def safest_time(
         )
 
     if latitude is None or longitude is None:
-
         raise HTTPException(
             status_code=400,
             detail=(
@@ -733,23 +665,19 @@ def safest_time(
     # ---------------------------------------------
     # Fetch forecast
     # ---------------------------------------------
-
     try:
-
         forecast = get_tomorrow_forecast(
             latitude,
             longitude
         )
 
     except Exception as e:
-
         raise HTTPException(
             status_code=502,
             detail=f"Forecast API error: {str(e)}"
         )
 
     if not forecast:
-
         raise HTTPException(
             status_code=404,
             detail="No forecast data available"
@@ -758,67 +686,37 @@ def safest_time(
     # ---------------------------------------------
     # Find safest time
     # ---------------------------------------------
-
-    safest, scored = get_safest_time(
-        forecast
-    )
+    safest, scored = get_safest_time(forecast)
 
     if safest is None:
-
         raise HTTPException(
             status_code=404,
             detail="Unable to calculate safety"
         )
 
     return {
-
         "agent": "Safety Agent",
-
         "status": "success",
-
         "mode": "safest_time",
-
         "zone_id": zone_id,
 
         "location": {
-
             "latitude": latitude,
-
             "longitude": longitude
-
         },
 
-        "date":
-            safest["time"][:10],
-
-        "safest_time":
-            safest["time"],
-
-        "forecast_safety_score":
-            safest["forecast_safety_score"],
-
-        "forecast_safety_level":
-            safest["forecast_safety_level"],
+        "date": safest["time"][:10],
+        "safest_time": safest["time"],
+        "forecast_safety_score": safest["forecast_safety_score"],
+        "forecast_safety_level": safest["forecast_safety_level"],
 
         "conditions": {
-
-            "wind_speed_ms":
-                safest["wind_speed_ms"],
-
-            "wave_height_m":
-                safest["wave_height_m"],
-
-            "wave_period_s":
-                safest["wave_period_s"],
-
-            "wave_direction_deg":
-                safest["wave_direction_deg"],
-
-            "precipitation_mm":
-                safest["precipitation_mm"]
-
+            "wind_speed_ms": safest["wind_speed_ms"],
+            "wave_height_m": safest["wave_height_m"],
+            "wave_period_s": safest["wave_period_s"],
+            "wave_direction_deg": safest["wave_direction_deg"],
+            "precipitation_mm": safest["precipitation_mm"]
         },
 
         "hourly_options": scored
-
     }
