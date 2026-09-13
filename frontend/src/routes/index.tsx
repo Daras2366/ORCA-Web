@@ -1,18 +1,20 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import { AppShell } from "@/components/AppShell";
 import { MarineMap } from "@/components/MarineMap";
 import { OceanConditions } from "@/components/OceanConditions";
 import { RecommendedZone } from "@/components/RecommendedZone";
 import { SafetyAlerts } from "@/components/SafetyAlerts";
 import { QuickRouteEstimate } from "@/components/QuickRouteEstimate";
+import { NavigationPanel } from "@/components/NavigationPanel";
+import { NavigationResults } from "@/components/NavigationResults";
 import { useLocationContext } from "@/hooks/useLocation";
 import { useMapLocate } from "@/hooks/useMapLocate";
 import { getFishingZones, getOceanConditions } from "@/services/oceanService";
 import { getSafetyReport } from "@/services/safetyService";
 import { getRouteEstimate } from "@/services/routeService";
-import type { ZoneFactor } from "@/types/marine";
+import type { NavigationResult, ZoneFactor } from "@/types/marine";
 import {
   Dialog,
   DialogContent,
@@ -37,10 +39,31 @@ export const Route = createFileRoute("/")({
   component: Dashboard,
 });
 
+// Callback type expected by NavigationPanel – must match its internal signature.
+type NavMode = "idle" | "selecting_start" | "selecting_destination";
+type NavClickHandler = (lat: number, lng: number) => void;
+
 function Dashboard() {
   const { location } = useLocationContext();
   const { registerZones, locateRequest } = useMapLocate();
   const [detailZone, setDetailZone] = useState<string | null>(null);
+
+  // --- Navigation state ---
+  const [navigationResult, setNavigationResult] = useState<NavigationResult | null>(null);
+  const [navigationMode, setNavigationMode] = useState<NavMode>("idle");
+  const [navMapClickHandler, setNavMapClickHandler] = useState<NavClickHandler | null>(null);
+
+  // Stable map-click forwarder so MarineMap doesn't re-register listeners unnecessarily.
+  const handleMapClick = useCallback(
+    (lat: number, lng: number) => {
+      navMapClickHandler?.(lat, lng);
+    },
+    [navMapClickHandler],
+  );
+
+  const handleRegisterNavClickHandler = useCallback((handler: NavClickHandler | null) => {
+    setNavMapClickHandler(handler);
+  }, []);
 
   const zonesQuery = useQuery({
     queryKey: ["fishing-zones", location.latitude, location.longitude],
@@ -95,7 +118,23 @@ function Dashboard() {
           error={zonesQuery.isError ? "error" : null}
           onViewDetails={setDetailZone}
           locateRequest={locateRequest}
+          navigationResult={navigationResult}
+          onMapClick={handleMapClick}
+          navigationMode={navigationMode}
         />
+
+        {/* Navigation planning panel — rendered below the map */}
+        <NavigationPanel
+          userLocation={location}
+          onRouteCalculated={(result) => setNavigationResult(result)}
+          onModeChange={(mode) => setNavigationMode(mode)}
+          onRegisterClickHandler={handleRegisterNavClickHandler}
+        />
+
+        {/* Navigation results panel — visible when a successful route exists */}
+        {navigationResult?.success && (
+          <NavigationResults result={navigationResult} onClose={() => setNavigationResult(null)} />
+        )}
 
         <OceanConditions
           data={oceanQuery.data?.conditions}
@@ -129,7 +168,8 @@ function Dashboard() {
           <DialogHeader>
             <DialogTitle>{selected?.zone_id} details</DialogTitle>
             <DialogDescription>
-              Zone data from ORCA backend. Marker positions are zone centroids, not official PFZ boundary polygons.
+              Zone data from ORCA backend. Marker positions are zone centroids, not official PFZ
+              boundary polygons.
             </DialogDescription>
           </DialogHeader>
           <dl className="grid grid-cols-2 gap-3 text-sm">
@@ -138,9 +178,14 @@ function Dashboard() {
             <Detail label="SST" value={selected?.sst_c != null ? `${selected.sst_c}°C` : "N/A"} />
             <Detail
               label="Chlorophyll"
-              value={selected?.chlorophyll_mg_m3 != null ? `${selected.chlorophyll_mg_m3} mg/m³` : "N/A"}
+              value={
+                selected?.chlorophyll_mg_m3 != null ? `${selected.chlorophyll_mg_m3} mg/m³` : "N/A"
+              }
             />
-            <Detail label="Safety" value={selected?.safety_score != null ? `${selected.safety_score}/100` : "N/A"} />
+            <Detail
+              label="Safety"
+              value={selected?.safety_score != null ? `${selected.safety_score}/100` : "N/A"}
+            />
             <Detail
               label="Coordinates"
               value={selected ? `${selected.latitude}, ${selected.longitude}` : "—"}

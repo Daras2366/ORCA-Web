@@ -1,19 +1,54 @@
 from fastapi import FastAPI, HTTPException, File, UploadFile
 from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
-from backend.agents.query_agent.schemas import QueryRequest
+from contextlib import asynccontextmanager
+from backend.agents.query_agent.schemas import QueryRequest, NavigateRequest
 from backend.gemini_client import ask_gemini, transcribe_audio, synthesize_speech
 from backend.agents.query_agent.gemini_planner import plan_query
 from backend.agents.query_agent.gemini_synthesizer import synthesize_answer
 from backend.api.feedback_api import router as feedback_router
+from backend.agents.routing_agent.routing.cache import (
+    initialize_routing_cache,
+    get_routing_cache,
+    is_cache_initialized,
+    get_cache_error,
+)
+from backend.agents.routing_agent.routing.service import run_route
 
 import requests, pandas as pd, re, os
 from datetime import datetime, timedelta
 from math import radians, sin, cos, asin, sqrt
 
-app = FastAPI(title="ORCA Query Agent", version="7.0.0")
-
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:8080")
+
+# ---------------------------------------------------------------------------
+# FastAPI lifespan - initialize routing cache at startup
+# ---------------------------------------------------------------------------
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Initialize routing cache on startup."""
+    # Startup
+    try:
+        print("[Query Agent] Initializing routing cache...")
+        initialize_routing_cache()
+        cache_info = get_routing_cache()
+        print(f"[Query Agent] Routing cache initialized: {cache_info['grid_rows']}x{cache_info['grid_cols']} grid, {cache_info['navigable_cells']} navigable cells")
+    except Exception as exc:
+        print(f"[Query Agent] Failed to initialize routing cache: {exc}")
+        # Continue startup even if routing cache fails - other features will work
+        print("[Query Agent] Navigation endpoint will be unavailable")
+    
+    yield
+    
+    # Shutdown (cleanup if needed)
+    print("[Query Agent] Shutting down...")
+
+app = FastAPI(
+    title="ORCA Query Agent",
+    version="7.0.0",
+    lifespan=lifespan,
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -2656,6 +2691,74 @@ def get_route_info(zone_id: str):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/route/navigate")
+def navigate_route(request: NavigateRequest):
+    """
+    Calculate a deterministic marine navigation route between two coordinates.
+    
+    This endpoint uses the new deterministic routing service with A* pathfinding,
+    bathymetry-aware navigation, and current-aware cost calculation.
+    
+    Request body example:
+    {
+        "start_latitude": 10.5,
+        "start_longitude": 76.0,
+        "destination_latitude": 12.0,
+        "destination_longitude": 77.5
+    }
+    
+    Returns a JSON response with route metrics and GeoJSON geometry.
+    """
+    # Check if routing cache is initialized
+    if not is_cache_initialized():
+        cache_error = get_cache_error()
+        raise HTTPException(
+            status_code=503,
+            detail=f"Routing service unavailable: {cache_error or 'Cache not initialized'}"
+        )
+    
+    # Get routing cache
+    cache = get_routing_cache()
+    if cache is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Routing cache not available"
+        )
+    
+    # Call routing service with cached data
+    try:
+        result = run_route(
+            start_latitude=request.start_latitude,
+            start_longitude=request.start_longitude,
+            destination_latitude=request.destination_latitude,
+            destination_longitude=request.destination_longitude,
+            cache=cache,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Routing calculation failed: {str(exc)}"
+        )
+    
+    # Handle routing service failures
+    if not result.get("success"):
+        error_detail = result.get("message", "Unknown routing error")
+        
+        # Return appropriate HTTP status based on error type
+        if "outside the supported grid" in error_detail:
+            raise HTTPException(status_code=400, detail=error_detail)
+        elif "outside the valid range" in error_detail:
+            raise HTTPException(status_code=400, detail=error_detail)
+        elif "coordinates contain non-finite values" in error_detail:
+            raise HTTPException(status_code=400, detail=error_detail)
+        elif "blocked cell" in error_detail:
+            raise HTTPException(status_code=400, detail=error_detail)
+        else:
+            raise HTTPException(status_code=500, detail=error_detail)
+    
+    return result
 
 def evaluate(z):
     """Evaluate a zone by calling all three specialized agents."""

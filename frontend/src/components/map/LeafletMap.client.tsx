@@ -1,9 +1,9 @@
 import { useEffect, useRef, type MutableRefObject } from "react";
 import L from "leaflet";
-import { MapContainer, Marker, Popup, TileLayer, useMap } from "react-leaflet";
+import { MapContainer, Marker, Popup, TileLayer, useMap, Polyline } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import type { LocateRequest } from "@/hooks/useMapLocate";
-import type { FishingZone, UserLocation } from "@/types/marine";
+import type { FishingZone, UserLocation, NavigationResult } from "@/types/marine";
 
 function zoneColor(zone: FishingZone) {
   if (zone.potential === "High") return "var(--safe)";
@@ -35,11 +35,28 @@ const vesselIcon = L.divIcon({
   html: `<div style="width:18px;height:18px;border-radius:4px;background:var(--shell);box-shadow:0 0 0 3px var(--deep);"></div>`,
 });
 
+const startIcon = L.divIcon({
+  className: "",
+  iconSize: [24, 24],
+  iconAnchor: [12, 12],
+  html: `<div style="width:24px;height:24px;border-radius:50%;background:#22c55e;border:3px solid #ffffff;box-shadow:0 0 0 3px #22c55e;"></div>`,
+});
+
+const destinationIcon = L.divIcon({
+  className: "",
+  iconSize: [24, 24],
+  iconAnchor: [12, 12],
+  html: `<div style="width:24px;height:24px;border-radius:50%;background:#ef4444;border:3px solid #ffffff;box-shadow:0 0 0 3px #ef4444;"></div>`,
+});
+
 interface Props {
   zones: FishingZone[];
   location: UserLocation;
   onViewDetails: (zoneId: string) => void;
   locateRequest: LocateRequest | null;
+  navigationResult?: NavigationResult | null;
+  onMapClick?: (lat: number, lng: number) => void;
+  navigationMode?: "idle" | "selecting_start" | "selecting_destination";
 }
 
 function ZoneMapController({
@@ -91,7 +108,50 @@ function LocationMapController({ location }: { location: UserLocation }) {
   return null;
 }
 
-export default function LeafletMap({ zones, location, onViewDetails, locateRequest }: Props) {
+function NavigationController({
+  navigationResult,
+  onMapClick,
+  navigationMode,
+}: {
+  navigationResult?: NavigationResult | null;
+  onMapClick?: (lat: number, lng: number) => void;
+  navigationMode?: "idle" | "selecting_start" | "selecting_destination";
+}) {
+  const map = useMap();
+
+  useEffect(() => {
+    if (!onMapClick || navigationMode === "idle") return;
+
+    const handleClick = (e: L.LeafletMouseEvent) => {
+      const target = e.originalEvent.target;
+
+      if (target instanceof HTMLElement && target.closest(".leaflet-marker-icon")) {
+        return;
+      }
+
+      const { lat, lng } = e.latlng;
+      onMapClick(lat, lng);
+    };
+
+    map.on("click", handleClick);
+
+    return () => {
+      map.off("click", handleClick);
+    };
+  }, [onMapClick, navigationMode, map]);
+
+  return null;
+}
+
+export default function LeafletMap({
+  zones,
+  location,
+  onViewDetails,
+  locateRequest,
+  navigationResult,
+  onMapClick,
+  navigationMode,
+}: Props) {
   const markerRefs = useRef<Record<string, L.Marker | null>>({});
 
   return (
@@ -112,6 +172,60 @@ export default function LeafletMap({ zones, location, onViewDetails, locateReque
 
         <LocationMapController location={location} />
 
+        <NavigationController
+          navigationResult={navigationResult}
+          onMapClick={onMapClick}
+          navigationMode={navigationMode}
+        />
+
+        {/* Navigation Route Line */}
+        {navigationResult?.success && navigationResult.geojson.coordinates.length > 0 && (
+          <Polyline
+            positions={navigationResult.geojson.coordinates.map(([lng, lat]) => [lat, lng])}
+            color="#3b82f6"
+            weight={3}
+            opacity={0.8}
+          />
+        )}
+
+        {/* Start Point Marker */}
+        {navigationResult?.success && (
+          <Marker
+            position={[
+              navigationResult.snapped_start.latitude,
+              navigationResult.snapped_start.longitude,
+            ]}
+            icon={startIcon}
+          >
+            <Popup>
+              <p className="text-sm font-semibold text-shell">Start Point</p>
+              <p className="text-xs text-muted-foreground">
+                {navigationResult.snapped_start.latitude.toFixed(4)},{" "}
+                {navigationResult.snapped_start.longitude.toFixed(4)}
+              </p>
+            </Popup>
+          </Marker>
+        )}
+
+        {/* Destination Point Marker */}
+        {navigationResult?.success && (
+          <Marker
+            position={[
+              navigationResult.snapped_destination.latitude,
+              navigationResult.snapped_destination.longitude,
+            ]}
+            icon={destinationIcon}
+          >
+            <Popup>
+              <p className="text-sm font-semibold text-shell">Destination</p>
+              <p className="text-xs text-muted-foreground">
+                {navigationResult.snapped_destination.latitude.toFixed(4)},{" "}
+                {navigationResult.snapped_destination.longitude.toFixed(4)}
+              </p>
+            </Popup>
+          </Marker>
+        )}
+
         <Marker position={[location.latitude, location.longitude]} icon={vesselIcon}>
           <Popup>
             <p className="text-sm font-semibold text-shell">Your Vessel</p>
@@ -129,6 +243,16 @@ export default function LeafletMap({ zones, location, onViewDetails, locateReque
             }}
             position={[zone.latitude, zone.longitude]}
             icon={zoneIcon(zone)}
+            eventHandlers={{
+              click: (event) => {
+                L.DomEvent.stopPropagation(event.originalEvent);
+
+                if (navigationMode !== "idle" && onMapClick) {
+                  onMapClick(zone.latitude, zone.longitude);
+                  return;
+                }
+              },
+            }}
           >
             <Popup>
               <div className="w-48 space-y-2">

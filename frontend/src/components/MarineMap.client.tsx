@@ -1,13 +1,10 @@
-import { Suspense, lazy } from "react";
-import { ClientOnly } from "@tanstack/react-router";
+import { Suspense, lazy, useEffect, useState } from "react";
 import { Layers, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { LocateRequest } from "@/hooks/useMapLocate";
 import type { FishingZone, UserLocation, NavigationResult } from "@/types/marine";
 
-// Lazy-load the Leaflet map. This import is ONLY used inside <ClientOnly>,
-// so the TanStack Start compiler removes it from the SSR bundle entirely
-// (handleClientOnlyJSX transform strips <ClientOnly> children on the server).
+// Allowed: this is a .client. file, so it can directly import other .client. files.
 const LeafletMap = lazy(() => import("./map/LeafletMap.client"));
 
 interface Props {
@@ -42,6 +39,9 @@ export function MarineMap({
   onMapClick,
   navigationMode,
 }: Props) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
   return (
     <section className="panel overflow-hidden">
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
@@ -62,24 +62,20 @@ export function MarineMap({
           <div className="flex h-full items-center justify-center px-6 text-center text-sm text-danger">
             Unable to retrieve fishing zone data.
           </div>
-        ) : loading ? (
+        ) : !mounted || loading ? (
           <MapFallback label="Loading marine map…" />
         ) : (
-          // ClientOnly ensures the Leaflet map (and its .client. imports) are
-          // excluded from the SSR bundle by the TanStack Start compiler transform.
-          <ClientOnly fallback={<MapFallback label="Loading marine map…" />}>
-            <Suspense fallback={<MapFallback label="Loading marine map…" />}>
-              <LeafletMap
-                zones={zones}
-                location={location}
-                onViewDetails={onViewDetails}
-                locateRequest={locateRequest ?? null}
-                navigationResult={navigationResult}
-                onMapClick={onMapClick}
-                navigationMode={navigationMode}
-              />
-            </Suspense>
-          </ClientOnly>
+          <Suspense fallback={<MapFallback label="Loading marine map…" />}>
+            <LeafletMap
+              zones={zones}
+              location={location}
+              onViewDetails={onViewDetails}
+              locateRequest={locateRequest ?? null}
+              navigationResult={navigationResult}
+              onMapClick={onMapClick}
+              navigationMode={navigationMode}
+            />
+          </Suspense>
         )}
       </div>
 

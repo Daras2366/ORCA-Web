@@ -52,6 +52,72 @@ export interface RouteEstimate {
   note: string;
 }
 
+export interface NavigationRequest {
+  start_latitude: number;
+  start_longitude: number;
+  destination_latitude: number;
+  destination_longitude: number;
+}
+
+export interface NavigationResponse {
+  success: boolean;
+  message: string;
+  start: {
+    latitude: number;
+    longitude: number;
+  };
+  destination: {
+    latitude: number;
+    longitude: number;
+  };
+  snapped_start: {
+    latitude: number;
+    longitude: number;
+  };
+  snapped_destination: {
+    latitude: number;
+    longitude: number;
+  };
+  metrics: {
+    distance_km: number;
+    travel_time_h: number;
+    fuel_l: number;
+    min_depth_m: number;
+    max_depth_m: number;
+    average_depth_m: number;
+    average_current_ms: number | null;
+    total_cost: number;
+  };
+  geojson: {
+    type: "LineString";
+    coordinates: [number, number][];
+  };
+}
+
+export interface NavigationResult {
+  success: boolean;
+  distance_km: number;
+  travel_time_h: number;
+  fuel_l: number;
+  min_depth_m: number;
+  max_depth_m: number;
+  average_depth_m: number;
+  average_current_ms: number | null;
+  geojson: {
+    type: "LineString";
+    coordinates: [number, number][];
+  };
+  snapped_start: {
+    latitude: number;
+    longitude: number;
+  };
+  snapped_destination: {
+    latitude: number;
+    longitude: number;
+  };
+  error?: string;
+}
+
 export interface ZoneFactor {
   factor: string;
   score: number;

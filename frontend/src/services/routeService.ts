@@ -1,5 +1,5 @@
-import type { RouteEstimate, UserLocation } from "@/types/marine";
-import { apiGet } from "./apiClient";
+import type { RouteEstimate, UserLocation, NavigationRequest, NavigationResult } from "@/types/marine";
+import { apiGet, apiPost } from "./apiClient";
 
 /** Shape returned by GET /api/route (Query Agent proxies to Routing Agent). */
 interface RouteApiResponse {
@@ -77,4 +77,91 @@ export async function getRouteEstimate(
     fuel_litres: fuelL,
     note,
   };
+}
+
+// POST /api/route/navigate (deterministic A* routing)
+export async function navigateRoute(
+  startLatitude: number,
+  startLongitude: number,
+  destinationLatitude: number,
+  destinationLongitude: number,
+): Promise<NavigationResult> {
+  try {
+    const response = await apiPost<{
+      success: boolean;
+      message: string;
+      start: { latitude: number; longitude: number };
+      destination: { latitude: number; longitude: number };
+      snapped_start: { latitude: number; longitude: number };
+      snapped_destination: { latitude: number; longitude: number };
+      metrics: {
+        distance_km: number;
+        travel_time_h: number;
+        fuel_l: number;
+        min_depth_m: number;
+        max_depth_m: number;
+        average_depth_m: number;
+        average_current_ms: number | null;
+        total_cost: number;
+      };
+      geojson: {
+        type: "LineString";
+        coordinates: [number, number][];
+      };
+    }>("/api/route/navigate", {
+      start_latitude: startLatitude,
+      start_longitude: startLongitude,
+      destination_latitude: destinationLatitude,
+      destination_longitude: destinationLongitude,
+    });
+
+    if (!response.success) {
+      return {
+        success: false,
+        distance_km: 0,
+        travel_time_h: 0,
+        fuel_l: 0,
+        min_depth_m: 0,
+        max_depth_m: 0,
+        average_depth_m: 0,
+        average_current_ms: null,
+        geojson: { type: "LineString", coordinates: [] },
+        snapped_start: { latitude: 0, longitude: 0 },
+        snapped_destination: { latitude: 0, longitude: 0 },
+        error: response.message || "Navigation failed",
+      };
+    }
+
+    return {
+      success: true,
+      distance_km: response.metrics.distance_km,
+      travel_time_h: response.metrics.travel_time_h,
+      fuel_l: response.metrics.fuel_l,
+      min_depth_m: response.metrics.min_depth_m,
+      max_depth_m: response.metrics.max_depth_m,
+      average_depth_m: response.metrics.average_depth_m,
+      average_current_ms: response.metrics.average_current_ms,
+      geojson: response.geojson,
+      snapped_start: response.snapped_start,
+      snapped_destination: response.snapped_destination,
+    };
+  } catch (error) {
+    // Handle HTTP errors (400, 500, etc.)
+    const errorMessage = error instanceof Error ? error.message : "Navigation request failed";
+    
+    return {
+      success: false,
+      distance_km: 0,
+      travel_time_h: 0,
+      fuel_l: 0,
+      min_depth_m: 0,
+      max_depth_m: 0,
+      average_depth_m: 0,
+      average_current_ms: null,
+      geojson: { type: "LineString", coordinates: [] },
+      snapped_start: { latitude: 0, longitude: 0 },
+      snapped_destination: { latitude: 0, longitude: 0 },
+      error: errorMessage,
+    };
+  }
 }
