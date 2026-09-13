@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { AppShell } from "@/components/AppShell";
 import { MarineMap } from "@/components/MarineMap";
 import { OceanConditions } from "@/components/OceanConditions";
@@ -40,8 +40,6 @@ export const Route = createFileRoute("/")({
 });
 
 // Callback type expected by NavigationPanel – must match its internal signature.
-type NavMode = "idle" | "selecting_start" | "selecting_destination";
-type NavClickHandler = (lat: number, lng: number) => void;
 
 function Dashboard() {
   const { location } = useLocationContext();
@@ -50,20 +48,14 @@ function Dashboard() {
 
   // --- Navigation state ---
   const [navigationResult, setNavigationResult] = useState<NavigationResult | null>(null);
-  const [navigationMode, setNavigationMode] = useState<NavMode>("idle");
-  const [navMapClickHandler, setNavMapClickHandler] = useState<NavClickHandler | null>(null);
 
-  // Stable map-click forwarder so MarineMap doesn't re-register listeners unnecessarily.
-  const handleMapClick = useCallback(
-    (lat: number, lng: number) => {
-      navMapClickHandler?.(lat, lng);
-    },
-    [navMapClickHandler],
-  );
+  const [routeTargetZoneId, setRouteTargetZoneId] = useState<string | null>(null);
 
-  const handleRegisterNavClickHandler = useCallback((handler: NavClickHandler | null) => {
-    setNavMapClickHandler(handler);
-  }, []);
+  const [routePanelOpen, setRoutePanelOpen] = useState(false);
+  const handleShowRoute = (zoneId: string) => {
+    setRouteTargetZoneId(zoneId);
+    setRoutePanelOpen(true);
+  };
 
   const zonesQuery = useQuery({
     queryKey: ["fishing-zones", location.latitude, location.longitude],
@@ -116,19 +108,21 @@ function Dashboard() {
           location={location}
           loading={zonesQuery.isPending}
           error={zonesQuery.isError ? "error" : null}
-          onViewDetails={setDetailZone}
-          locateRequest={locateRequest}
+          onShowRoute={handleShowRoute}
+          locateRequest={locateRequest ?? null}
           navigationResult={navigationResult}
-          onMapClick={handleMapClick}
-          navigationMode={navigationMode}
         />
 
         {/* Navigation planning panel — rendered below the map */}
         <NavigationPanel
           userLocation={location}
-          onRouteCalculated={(result) => setNavigationResult(result)}
-          onModeChange={(mode) => setNavigationMode(mode)}
-          onRegisterClickHandler={handleRegisterNavClickHandler}
+          zones={zones}
+          initialZoneId={routeTargetZoneId}
+          open={routePanelOpen}
+          onOpenChange={setRoutePanelOpen}
+          onRouteCalculated={(result) => {
+            setNavigationResult(result);
+          }}
         />
 
         {/* Navigation results panel — visible when a successful route exists */}

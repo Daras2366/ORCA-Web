@@ -52,11 +52,9 @@ const destinationIcon = L.divIcon({
 interface Props {
   zones: FishingZone[];
   location: UserLocation;
-  onViewDetails: (zoneId: string) => void;
+  onShowRoute: (zoneId: string) => void;
   locateRequest: LocateRequest | null;
   navigationResult?: NavigationResult | null;
-  onMapClick?: (lat: number, lng: number) => void;
-  navigationMode?: "idle" | "selecting_start" | "selecting_destination";
 }
 
 function ZoneMapController({
@@ -108,49 +106,12 @@ function LocationMapController({ location }: { location: UserLocation }) {
   return null;
 }
 
-function NavigationController({
-  navigationResult,
-  onMapClick,
-  navigationMode,
-}: {
-  navigationResult?: NavigationResult | null;
-  onMapClick?: (lat: number, lng: number) => void;
-  navigationMode?: "idle" | "selecting_start" | "selecting_destination";
-}) {
-  const map = useMap();
-
-  useEffect(() => {
-    if (!onMapClick || navigationMode === "idle") return;
-
-    const handleClick = (e: L.LeafletMouseEvent) => {
-      const target = e.originalEvent.target;
-
-      if (target instanceof HTMLElement && target.closest(".leaflet-marker-icon")) {
-        return;
-      }
-
-      const { lat, lng } = e.latlng;
-      onMapClick(lat, lng);
-    };
-
-    map.on("click", handleClick);
-
-    return () => {
-      map.off("click", handleClick);
-    };
-  }, [onMapClick, navigationMode, map]);
-
-  return null;
-}
-
 export default function LeafletMap({
   zones,
   location,
-  onViewDetails,
+  onShowRoute,
   locateRequest,
   navigationResult,
-  onMapClick,
-  navigationMode,
 }: Props) {
   const markerRefs = useRef<Record<string, L.Marker | null>>({});
 
@@ -171,12 +132,6 @@ export default function LeafletMap({
         <ZoneMapController locateRequest={locateRequest} markerRefs={markerRefs} zones={zones} />
 
         <LocationMapController location={location} />
-
-        <NavigationController
-          navigationResult={navigationResult}
-          onMapClick={onMapClick}
-          navigationMode={navigationMode}
-        />
 
         {/* Navigation Route Line */}
         {navigationResult?.success && navigationResult.geojson.coordinates.length > 0 && (
@@ -243,16 +198,6 @@ export default function LeafletMap({
             }}
             position={[zone.latitude, zone.longitude]}
             icon={zoneIcon(zone)}
-            eventHandlers={{
-              click: (event) => {
-                L.DomEvent.stopPropagation(event.originalEvent);
-
-                if (navigationMode !== "idle" && onMapClick) {
-                  onMapClick(zone.latitude, zone.longitude);
-                  return;
-                }
-              },
-            }}
           >
             <Popup>
               <div className="w-48 space-y-2">
@@ -294,10 +239,12 @@ export default function LeafletMap({
                 </div>
                 <button
                   type="button"
-                  onClick={() => onViewDetails(zone.zone_id)}
+                  onClick={() => {
+                    onShowRoute(zone.zone_id);
+                  }}
                   className="w-full rounded-md bg-rose px-2 py-1.5 text-xs font-medium text-primary-foreground"
                 >
-                  View Details
+                  Show Route
                 </button>
               </div>
             </Popup>

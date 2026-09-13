@@ -15,11 +15,9 @@ interface Props {
   location: UserLocation;
   loading?: boolean | undefined;
   error?: string | null | undefined;
-  onViewDetails: (zoneId: string) => void;
+  onShowRoute: (zoneId: string) => void;
   locateRequest?: LocateRequest | null;
   navigationResult?: NavigationResult | null;
-  onMapClick?: (lat: number, lng: number) => void;
-  navigationMode?: "idle" | "selecting_start" | "selecting_destination";
 }
 
 function MapFallback({ label }: { label: string }) {
@@ -36,11 +34,9 @@ export function MarineMap({
   location,
   loading,
   error,
-  onViewDetails,
+  onShowRoute,
   locateRequest,
   navigationResult,
-  onMapClick,
-  navigationMode,
 }: Props) {
   return (
     <section className="panel overflow-hidden">
@@ -72,11 +68,9 @@ export function MarineMap({
               <LeafletMap
                 zones={zones}
                 location={location}
-                onViewDetails={onViewDetails}
+                onShowRoute={onShowRoute}
                 locateRequest={locateRequest ?? null}
                 navigationResult={navigationResult}
-                onMapClick={onMapClick}
-                navigationMode={navigationMode}
               />
             </Suspense>
           </ClientOnly>
