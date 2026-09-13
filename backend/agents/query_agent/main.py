@@ -380,7 +380,8 @@ def ocean(z):
 def safety(z):
     return call(
         f"{SAFETY_API}/safety/analyze",
-        {"zone_id": z}
+        {"zone_id": z},
+        30
     )
 
 def route(z):

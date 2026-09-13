@@ -340,6 +340,67 @@ function CycloneSection({ raw }: { raw: SafetyRawEvidence }) {
 }
 
 // ---------------------------------------------------------------------------
+// Lightning Risk
+// ---------------------------------------------------------------------------
+
+function LightningSection({ raw }: { raw: SafetyRawEvidence }) {
+  const l = raw.lightning;
+  const isAvailable = l?.available === true && l.risk != null;
+  const isSevere = isAvailable && l!.risk! >= 0.55;
+
+  return (
+    <section className="panel p-4">
+      <h2 className="text-sm font-semibold text-shell">
+        Lightning &amp; Thunderstorm Risk
+      </h2>
+      {!isAvailable ? (
+        <div className="mt-4 flex items-center gap-2 rounded-lg border border-border bg-muted/30 px-3 py-3">
+          <Zap className="size-4 text-muted-foreground/50" />
+          <p className="text-sm text-muted-foreground">
+            Lightning data unavailable for this location or time step.
+            {l?.source ? ` (${l.source})` : ""}
+          </p>
+        </div>
+      ) : (
+        <dl className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <div
+            className={`flex items-center justify-between rounded-lg border px-3 py-2 text-sm ${
+              isSevere ? "border-warn/40 bg-warn/10" : "border-border"
+            }`}
+          >
+            <dt className="flex items-center gap-1.5 text-muted-foreground">
+              <Zap className="size-3.5 shrink-0" />
+              Lightning Risk
+            </dt>
+            <dd className={`font-medium ${isSevere ? "text-warn" : "text-shell"}`}>
+              {((l!.risk! * 100).toFixed(0))}%
+              {isSevere && " — Elevated"}
+            </dd>
+          </div>
+          {l?.raw_jkg != null && (
+            <div className="flex items-center justify-between rounded-lg border border-border px-3 py-2 text-sm">
+              <dt className="flex items-center gap-1.5 text-muted-foreground">
+                <Zap className="size-3.5 shrink-0" />
+                Instability (CAPE proxy)
+              </dt>
+              <dd className="font-medium text-shell">
+                {fmtNum(l.raw_jkg, 0, "J/kg")}
+              </dd>
+            </div>
+          )}
+          {l?.source && (
+            <div className="flex items-center justify-between rounded-lg border border-border px-3 py-2 text-sm sm:col-span-2">
+              <dt className="text-muted-foreground">Source</dt>
+              <dd className="font-medium text-shell text-right text-xs">{l.source}</dd>
+            </div>
+          )}
+        </dl>
+      )}
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Zone Alerts table (uses nearest zone only — ranking not exposed via proxy)
 // ---------------------------------------------------------------------------
 
@@ -622,6 +683,9 @@ function Page() {
 
             {/* Cyclone / Storm */}
             <CycloneSection raw={raw} />
+
+            {/* Lightning */}
+            <LightningSection raw={raw} />
 
             {/* Zone Alerts */}
             <ZoneAlertsSection raw={raw} />

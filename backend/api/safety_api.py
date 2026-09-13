@@ -4,6 +4,7 @@ from pydantic import BaseModel
 import pandas as pd
 import numpy as np
 import os
+import time
 
 from backend.agents.safety_agent.live_marine_adapter import get_live_conditions, get_live_conditions_bulk
 from backend.agents.safety_agent.forecast_adapter import (
@@ -12,6 +13,7 @@ from backend.agents.safety_agent.forecast_adapter import (
     get_safest_time
 )
 from backend.agents.safety_agent.cyclone_adapter import get_cyclone_risk
+from backend.agents.safety_agent.mosdac_lightning_adapter import get_mosdac_lightning_risk, get_mosdac_lightning_risk_bulk
 
 
 BASE_DIR = os.path.dirname(
@@ -140,30 +142,69 @@ def calculate_risk(row):
     return round(float(sum(risks)), 4)
     
 def calculate_live_risk(data):
-    contributions = []
-    wind_kmh = data.get("wind_speed_kmh")
-    wave = data.get("wave_height_m")
-    rainfall = data.get("precipitation_mm")
-    current = data.get("current_speed_ms")
+    """
+    Weighted live risk score (0–1).
 
+    Target weights when ALL variables are available:
+      wind       20%
+      waves      20%
+      rainfall   10%
+      current    15%
+      cyclone    20%
+      lightning  15%
+
+    Variables that are missing (None / unavailable) are excluded
+    from both the numerator and the denominator so that the score
+    always normalises to the same 0–1 scale.
+    """
+    # Base weights — must sum to 1.0 when all present
+    WEIGHTS = {
+        "wind":      0.20,
+        "waves":     0.20,
+        "rainfall":  0.10,
+        "current":   0.15,
+        "cyclone":   0.20,
+        "lightning": 0.15,
+    }
+
+    weighted_sum = 0.0
+    total_weight = 0.0
+
+    wind_kmh = data.get("wind_speed_kmh")
     if wind_kmh is not None:
-        contributions.append(np.clip((wind_kmh / 3.6) / 15, 0, 1) * 0.25)
+        weighted_sum += np.clip((wind_kmh / 3.6) / 15, 0, 1) * WEIGHTS["wind"]
+        total_weight += WEIGHTS["wind"]
+
+    wave = data.get("wave_height_m")
     if wave is not None:
-        contributions.append(np.clip(wave / 4, 0, 1) * 0.25)
+        weighted_sum += np.clip(wave / 4, 0, 1) * WEIGHTS["waves"]
+        total_weight += WEIGHTS["waves"]
+
+    rainfall = data.get("precipitation_mm")
     if rainfall is not None:
-        contributions.append(np.clip(rainfall / 10, 0, 1) * 0.10)
+        weighted_sum += np.clip(rainfall / 10, 0, 1) * WEIGHTS["rainfall"]
+        total_weight += WEIGHTS["rainfall"]
+
+    current = data.get("current_speed_ms")
     if current is not None:
-        contributions.append(np.clip(current / 2, 0, 1) * 0.15)
+        weighted_sum += np.clip(current / 2, 0, 1) * WEIGHTS["current"]
+        total_weight += WEIGHTS["current"]
 
     cyclone = data.get("cyclone")
     if cyclone and cyclone.get("available"):
-        contributions.append(float(cyclone.get("risk", 0)) * 0.15)
+        weighted_sum += float(cyclone.get("risk", 0)) * WEIGHTS["cyclone"]
+        total_weight += WEIGHTS["cyclone"]
 
-    if not contributions:
+    lightning = data.get("lightning")
+    if lightning and lightning.get("available") and lightning.get("risk") is not None:
+        weighted_sum += float(lightning["risk"]) * WEIGHTS["lightning"]
+        total_weight += WEIGHTS["lightning"]
+
+    if total_weight == 0:
         return None
 
-    total_weight = 0.90 if cyclone and cyclone.get("available") else 0.75
-    return round(float(sum(contributions) / total_weight), 4)
+    score = round(float(weighted_sum / total_weight), 4)
+    return score
 
 
 # ---------------------------------------------------------
@@ -260,6 +301,10 @@ def analyze_safety(request: SafetyRequest):
             latitude,
             longitude
         )
+        live["lightning"] = get_mosdac_lightning_risk(
+            latitude,
+            longitude
+        )
 
     except Exception as e:
         raise HTTPException(
@@ -276,55 +321,52 @@ def analyze_safety(request: SafetyRequest):
     # --------------------------------------------------
     # RESPONSE
     # --------------------------------------------------
+    lightning = live.get("lightning", {})
+    lightning_live = bool(lightning.get("available"))
+    base_source = live.get("source", "Open-Meteo + GDACS")
+    data_source = (
+        base_source + " + MOSDAC Lightning Forecast"
+        if lightning_live
+        else base_source
+    )
+
     return {
         "agent": "Safety Agent",
         "status": "success",
         "mode": "live",
-        "data_source": live.get("source"),
+        "data_source": data_source,
         "timestamp": live.get("timestamp"),
-        
+
         "zone_id": zone_id,
         "location": {
             "latitude": latitude,
             "longitude": longitude
         },
-        
+
         "risk_score": risk_score,
         "risk_level": risk_level,
-        
+
         "evidence": {
             "wind_speed_ms": (
                 live["wind_speed_kmh"] / 3.6
                 if live.get("wind_speed_kmh") is not None
                 else None
             ),
-
-            "wind_direction_deg":
-                live.get("wind_direction_deg"),
-
-            "wave_height_m":
-                live.get("wave_height_m"),
-
-            "wave_period_s":
-                live.get("wave_period_s"),
-
-            "wave_direction_deg":
-                live.get("wave_direction_deg"),
-
-            "rainfall_mean":
-                live.get("precipitation_mm"),
-
-            "current_speed_ms":
-                live.get("current_speed_ms"),
-
-            "current_direction_deg":
-                live.get("current_direction_deg"),
-
-            "sst_c":
-                live.get("sst_c"),
-                
-            "cyclone":
-                live.get("cyclone")
+            "wind_direction_deg": live.get("wind_direction_deg"),
+            "wave_height_m": live.get("wave_height_m"),
+            "wave_period_s": live.get("wave_period_s"),
+            "wave_direction_deg": live.get("wave_direction_deg"),
+            "rainfall_mean": live.get("precipitation_mm"),
+            "current_speed_ms": live.get("current_speed_ms"),
+            "current_direction_deg": live.get("current_direction_deg"),
+            "sst_c": live.get("sst_c"),
+            "cyclone": live.get("cyclone"),
+            "lightning": lightning if lightning else {
+                "available": False,
+                "risk": None,
+                "source": "not attempted",
+                "timestamp": None,
+            },
         }
     }
 
@@ -375,9 +417,8 @@ def safety_ranking():
     live_error = None
 
     try:
-        live_data = get_live_conditions_bulk(
-            points
-        )
+        t0 = time.time()
+        live_data = get_live_conditions_bulk(points)
 
     except Exception as e:
         live_error = str(e)
@@ -403,9 +444,11 @@ def safety_ranking():
         # LIVE SCORE
         # ==================================================
         if live:
+            live["lightning"] = None
+            
             risk_score = calculate_live_risk(live)
             risk_level = get_risk_level(risk_score)
-
+            
             safety_score = (
                 round(1 - risk_score, 4)
                 if risk_score is not None
@@ -414,42 +457,25 @@ def safety_ranking():
 
             results.append({
                 "zone_id": zone_id,
-                
                 "risk_score": risk_score,
                 "risk_level": risk_level,
                 "safety_score": safety_score,
-                
                 "data_mode": "live",
-                "data_source": "Open-Meteo",
+                "data_source": "Open-Meteo + GDACS",
                 "timestamp": live.get("timestamp"),
-
                 "evidence": {
-                    "wind_speed_ms":
-                        (
-                            live["wind_speed_kmh"] / 3.6
-                            if live.get(
-                                "wind_speed_kmh"
-                            ) is not None
-                            else None
-                        ),
-
-                    "wave_height_m":
-                        live.get("wave_height_m"),
-
-                    "wave_period_s":
-                        live.get("wave_period_s"),
-
-                    "rainfall_mm":
-                        live.get("precipitation_mm"),
-
-                    "current_speed_ms":
-                        live.get("current_speed_ms"),
-                        
-                    "cyclone":
-                        live.get("cyclone")
+                    "wind_speed_ms": (
+                        live["wind_speed_kmh"] / 3.6
+                        if live.get("wind_speed_kmh") is not None
+                        else None
+                    ),
+                    "wave_height_m": live.get("wave_height_m"),
+                    "wave_period_s": live.get("wave_period_s"),
+                    "rainfall_mm": live.get("precipitation_mm"),
+                    "current_speed_ms": live.get("current_speed_ms"),
+                    "cyclone": live.get("cyclone"),
                 }
             })
-
             continue
 
         # ==================================================
@@ -485,12 +511,8 @@ def safety_ranking():
     # SORT
     # --------------------------------------------------
     results.sort(
-        key=lambda x: (
-            x["risk_score"]
-            if x["risk_score"] is not None
-            else -1
-        ),
-        reverse=True
+        key = lambda x: x["risk_score"]
+        if x["risk_score"] is not None else 999
     )
 
     return {

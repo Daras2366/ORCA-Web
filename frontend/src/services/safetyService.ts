@@ -27,6 +27,13 @@ export interface SafetyRawEvidence {
   cyclone_wind_kt: number | null;
   rainfall_mean: number | null;
   current_speed_ms: number | null;
+  lightning: {
+    available: boolean;
+    risk: number | null;
+    raw_jkg: number | null;
+    source: string;
+    timestamp: string | null;
+  } | null;
 }
 
 export interface SafetyResult {
@@ -111,6 +118,18 @@ export async function getSafetyReport(location: UserLocation): Promise<SafetyRes
     cyclone_wind_kt: rawNum("cyclone_wind_kt"),
     rainfall_mean: rawNum("rainfall_mean"),
     current_speed_ms: rawNum("current_speed_ms"),
+    lightning: (() => {
+      const l = (evidence as Record<string, unknown>)["lightning"];
+      if (!l || typeof l !== "object") return null;
+      const lo = l as Record<string, unknown>;
+      return {
+        available: Boolean(lo["available"]),
+        risk: lo["risk"] != null ? Number(lo["risk"]) : null,
+        raw_jkg: lo["raw_jkg"] != null ? Number(lo["raw_jkg"]) : null,
+        source: String(lo["source"] ?? ""),
+        timestamp: lo["timestamp"] != null ? String(lo["timestamp"]) : null,
+      };
+    })(),
   };
 
   return { report, raw };
