@@ -37,7 +37,7 @@ def get_cyclone_risk(latitude, longitude):
         return {
             "available": False,
             "risk": 0.0,
-            "status": "UNKNOWN",
+            "status": "CLEAR",
             "source": "GDACS"
         }
 

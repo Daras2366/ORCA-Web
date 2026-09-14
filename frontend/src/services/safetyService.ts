@@ -10,7 +10,7 @@ interface SafetyApiResponse {
   zone_id?: string | null;
   risk_score?: number | null;
   risk_level?: string | null;
-  evidence?: Record<string, number | string | null>;
+  evidence?: Record<string, any>;
 }
 
 /** Raw numeric evidence values as returned by the Safety Agent. */
@@ -90,7 +90,10 @@ export async function getSafetyReport(location: UserLocation): Promise<SafetyRes
       },
       {
         label: "Cyclone Risk",
-        value: fmtEv("cyclone_distance_km", 0, " km"),
+        value:
+          evidence.cyclone?.available && evidence.cyclone.distance_km != null
+            ? `${Number(evidence.cyclone.distance_km).toFixed(0)} km`
+            : "Clear",
         level: overallLevel,
       },
     ],
