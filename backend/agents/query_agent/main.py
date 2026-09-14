@@ -21,6 +21,8 @@ from math import radians, sin, cos, asin, sqrt
 
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:8080")
 
+print("### ORCA QUERY AGENT LOADED FROM:", __file__)
+
 # ---------------------------------------------------------------------------
 # FastAPI lifespan - initialize routing cache at startup
 # ---------------------------------------------------------------------------
@@ -588,8 +590,6 @@ def nearest(lat, lon):
 
     return x.sort_values("_d").iloc[0]
 
-RECOMMENDATION_RADIUS_KM = 150.0
-
 
 def get_recommended_zone(latitude=None, longitude=None):
     """
@@ -780,6 +780,54 @@ def get_recommended_zone(latitude=None, longitude=None):
         candidates,
         key=lambda z: z["fishing_score"]
     )
+    
+def build_recommendation_response(p):
+    """
+    Return the exact same fishing recommendation used by
+    the dashboard.
+
+    This is deterministic and must not pass through Gemini
+    synthesis, because the dashboard and Assistant must show
+    the same recommended zone.
+    """
+
+    recommended = get_recommended_zone(
+        p.get("latitude"),
+        p.get("longitude")
+    )
+
+    if recommended is None:
+        return {
+            "status": "success",
+            "mode": "recommended_fishing_zone",
+            "answer": "No fishing zones are currently available."
+        }
+
+    zone_id = recommended["zone_id"]
+    score = recommended["fishing_score"]
+    distance = recommended["distance_km"]
+
+    if distance is not None:
+        answer = (
+            f"The recommended fishing zone is {zone_id}. "
+            f"It has a fishing score of {score:.2f} "
+            f"and is approximately {distance:.1f} km "
+            f"from your location."
+        )
+    else:
+        answer = (
+            f"The recommended fishing zone is {zone_id}. "
+            f"It has a fishing score of {score:.2f}."
+        )
+
+    return {
+        "status": "success",
+        "mode": "recommended_fishing_zone",
+        "recommended_zone": zone_id,
+        "distance_km": distance,
+        "fishing_score": score,
+        "answer": answer,
+    }
 
 def direct_ocean_ranking(qt):
     x=df().copy()
@@ -1274,6 +1322,66 @@ def query(req: QueryRequest):
 
     if not target_z and p["latitude"] is not None and p["longitude"] is not None:
         target_z = str(nearest(p["latitude"], p["longitude"]).zone_id)
+        
+    # ---------------------------------------------------------
+    # DETERMINISTIC FISHING RECOMMENDATION
+    # ---------------------------------------------------------
+
+    if qt == "highest_fishing":
+        result = build_recommendation_response(p)
+
+        save_conversation_context(
+            req.conversation_id,
+            p,
+            result
+        )
+
+        result["conversation_id"] = req.conversation_id
+
+        return result
+
+
+    # ---------------------------------------------------------
+    # FISHING RECOMMENDATION VARIANTS
+    # ---------------------------------------------------------
+
+    gemini_requirements = p.get(
+        "gemini_requirements",
+        {}
+    )
+
+    gemini_action = (
+        p.get("gemini_plan", {}).get("action")
+        if isinstance(p.get("gemini_plan", {}), dict)
+        else None
+    )
+
+    is_fishing_recommendation = (
+        "fishing" in p.get("intents", [])
+        and not p.get("zone_id")
+        and (
+            qt == "highest_fishing"
+            or gemini_action == "recommend"
+            or (
+                isinstance(gemini_requirements, dict)
+                and gemini_requirements.get("find_best_zone") is True
+            )
+        )
+    )
+
+    if is_fishing_recommendation:
+        result = build_recommendation_response(p)
+
+        save_conversation_context(
+            req.conversation_id,
+            p,
+            result
+        )
+
+        result["conversation_id"] = req.conversation_id
+
+        return result
+
 
     # ---------------------------------------------------------
     # GEMINI MULTI-AGENT ORCHESTRATION
@@ -1699,55 +1807,6 @@ def query(req: QueryRequest):
                 "forecast_safety_score":f["forecast_safety_score"],"forecast_safety_level":f["forecast_safety_level"],
                 "conditions":f["conditions"],"answer":f"Tomorrow the safest time for {z} is {f['safest_time'][-5:]}. Safety score: {f['forecast_safety_score']}/100 ({f['forecast_safety_level']})."}
 
-    # ---------------------------------------------------------
-    # USER-FACING "BEST FISHING ZONE"
-    # ---------------------------------------------------------
-    #
-    # When the user asks "which fishing zone is best",
-    # use the same recommendation logic as the dashboard.
-    #
-    # This prevents the assistant from recommending a
-    # different PFZ from the dashboard.
-    # ---------------------------------------------------------
-
-    if qt == "highest_fishing":
-        recommended = get_recommended_zone(
-            p.get("latitude"),
-            p.get("longitude")
-        )
-
-        if recommended is None:
-            return {
-                "status": "success",
-                "mode": "highest_fishing",
-                "answer": (
-                    "No fishing zones are currently "
-                    "available."
-                )
-            }
-
-        zone_id = recommended["zone_id"]
-
-        return {
-            "status": "success",
-            "mode": "recommended_fishing_zone",
-            "recommended_zone": zone_id,
-            "distance_km": recommended["distance_km"],
-            "fishing_score": recommended["fishing_score"],
-            "answer": (
-                f"The recommended fishing zone is "
-                f"{zone_id}. "
-                f"It has a fishing score of "
-                f"{recommended['fishing_score']:.2f}"
-                + (
-                    f" and is approximately "
-                    f"{recommended['distance_km']:.1f} km "
-                    f"from your location."
-                    if recommended["distance_km"] is not None
-                    else "."
-                )
-            )
-        }
 
     # Ocean rankings without 337 HTTP calls
     if qt in [
@@ -3037,52 +3096,13 @@ def get_fishing_zones(
     latitude: float | None = None,
     longitude: float | None = None
 ):
-    """Return PFZ zone data for the frontend map, including safety scores."""
+    """Return PFZ zone data for the frontend map."""
 
     try:
         x = df().copy()
 
         if "pfz_label" in x.columns and not x[x.pfz_label == 1].empty:
             x = x[x.pfz_label == 1]
-
-        # ---------------------------------------------------------
-        # GET SAFETY FOR ALL PFZ ZONES IN ONE REQUEST
-        # ---------------------------------------------------------
-        try:
-            safety_request = requests.get(
-                f"{SAFETY_API}/safety/ranking",
-                timeout=15
-            )
-
-            if safety_request.status_code == 200:
-                safety_response = safety_request.json()
-            else:
-                safety_response = {
-                    "status": "error",
-                    "message": safety_request.text
-                }
-
-        except Exception as e:
-            safety_response = {
-                "status": "error",
-                "message": str(e)
-            }
-
-        safety_by_zone = {}
-
-        if safety_response.get("status") == "success":
-            for item in safety_response.get("zones", []):
-                zone_id = str(item.get("zone_id", "")).upper()
-
-                safety_score = item.get("safety_score")
-
-                if safety_score is not None:
-                    safety_score = round(
-                        float(safety_score) * 100,
-                        1
-                    )
-
-                safety_by_zone[zone_id] = safety_score
 
         # ---------------------------------------------------------
         # FISHING SCORE HELPERS
@@ -3186,10 +3206,6 @@ def get_fishing_zones(
             )
 
             zone_id = str(r.zone_id)
-
-            safety_score = safety_by_zone.get(
-                zone_id.upper()
-            )
             
             # ---------------------------------------------------------
             # ACTUAL VESSEL → PFZ DISTANCE
@@ -3232,7 +3248,7 @@ def get_fishing_zones(
                     if pd.notna(chl)
                     else None
                 ),
-                "safety_score": safety_by_zone.get(str(r.zone_id).upper()),
+                "safety_score": None,
                 "confidence": round(confidence, 2),
                 "fishing_score": round(fishing_score, 4),
                 "distance_km": (
@@ -3319,31 +3335,63 @@ def get_ocean_conditions(latitude: float | None = None, longitude: float | None 
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/safety")
-def get_safety_conditions(latitude: float | None = None, longitude: float | None = None):
-    """Get safety conditions for the frontend dashboard."""
+def get_safety_conditions(
+    zone_id: str | None = None,
+    latitude: float | None = None,
+    longitude: float | None = None
+):
+    """Get safety conditions for a specific PFZ or current location."""
+
     try:
-        # Find nearest zone if coordinates provided
-        if latitude is not None and longitude is not None:
+        # ---------------------------------------------------------
+        # SPECIFIC ZONE REQUEST
+        # ---------------------------------------------------------
+        # When the user clicks a PFZ on the map, use that exact
+        # zone instead of finding the nearest zone.
+        # ---------------------------------------------------------
+        if zone_id:
+            target_zone = zone_id.upper().strip()
+
+        # ---------------------------------------------------------
+        # LOCATION-BASED REQUEST
+        # ---------------------------------------------------------
+        # Keep the existing behaviour for the Dashboard Safety
+        # widget, which asks for safety near the vessel.
+        # ---------------------------------------------------------
+        elif latitude is not None and longitude is not None:
             nearest_zone = nearest(latitude, longitude)
-            zone_id = str(nearest_zone.zone_id)
+            target_zone = str(nearest_zone.zone_id)
+
         else:
-            # Get first available zone as fallback
-            zone_id = zones(True)[0] if zones(True) else None
-        
-        if not zone_id:
-            raise HTTPException(status_code=404, detail="No zones available")
-        
-        # Call Safety Agent
-        safety_response = safety(zone_id)
-        
+            raise HTTPException(
+                status_code=400,
+                detail="Provide zone_id or latitude and longitude."
+            )
+
+        # ---------------------------------------------------------
+        # CALL SAFETY AGENT FOR THIS ONE ZONE ONLY
+        # ---------------------------------------------------------
+        safety_response = safety(target_zone)
+
         if safety_response.get("status") != "success":
-            raise HTTPException(status_code=500, detail=safety_response.get("message", "Safety API error"))
-        
+            raise HTTPException(
+                status_code=500,
+                detail=safety_response.get(
+                    "message",
+                    "Safety API error"
+                )
+            )
+
         return safety_response
+
     except HTTPException:
         raise
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
 
 @app.get("/api/route")
 def get_route_info(zone_id: str):

@@ -135,6 +135,24 @@ export async function getSafetyReport(location: UserLocation): Promise<SafetyRes
   return { report, raw };
 }
 
+// GET /api/safety?zone_id=PFZxxxx
+// Used when the user opens a specific PFZ on the map.
+export async function getZoneSafetyScore(
+  zoneId: string,
+): Promise<number | null> {
+  const response = await apiGet<SafetyApiResponse>("/api/safety", {
+    zone_id: zoneId,
+  });
+
+  const riskScore = response.risk_score ?? null;
+
+  if (riskScore == null) {
+    return null;
+  }
+
+  return round((1 - Number(riskScore)) * 100, 1);
+}
+
 function round(n: number, decimals: number): number {
   const factor = Math.pow(10, decimals);
   return Math.round(n * factor) / factor;

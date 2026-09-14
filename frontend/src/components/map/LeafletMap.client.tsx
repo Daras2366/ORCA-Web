@@ -1,9 +1,10 @@
-import { useEffect, useRef, type MutableRefObject } from "react";
+import { useEffect, useRef, useState, type MutableRefObject } from "react";
 import L from "leaflet";
 import { MapContainer, Marker, Popup, TileLayer, useMap, Polyline } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import type { LocateRequest } from "@/hooks/useMapLocate";
 import type { FishingZone, UserLocation, NavigationResult } from "@/types/marine";
+import { getZoneSafetyScore } from "@/services/safetyService";
 
 function zoneColor(zone: FishingZone) {
   if (zone.potential === "High") return "var(--safe)";
@@ -115,6 +116,45 @@ export default function LeafletMap({
 }: Props) {
   const markerRefs = useRef<Record<string, L.Marker | null>>({});
 
+  const [zoneSafety, setZoneSafety] = useState<Record<string, number | null>>({});
+
+  const [zoneSafetyLoading, setZoneSafetyLoading] = useState<Record<string, boolean>>({});
+
+    const loadZoneSafety = async (zoneId: string) => {
+      const normalizedZoneId = zoneId.toUpperCase();
+
+      // Already loaded — do not make another request.
+      if (normalizedZoneId in zoneSafety) {
+        return;
+      }
+
+      setZoneSafetyLoading((previous) => ({
+        ...previous,
+        [normalizedZoneId]: true,
+      }));
+
+      try {
+        const score = await getZoneSafetyScore(normalizedZoneId);
+
+        setZoneSafety((previous) => ({
+          ...previous,
+          [normalizedZoneId]: score,
+        }));
+      } catch (error) {
+        console.error(`Failed to load safety for ${normalizedZoneId}:`, error);
+
+        setZoneSafety((previous) => ({
+          ...previous,
+          [normalizedZoneId]: null,
+        }));
+      } finally {
+        setZoneSafetyLoading((previous) => ({
+          ...previous,
+          [normalizedZoneId]: false,
+        }));
+      }
+    };
+
   return (
     <div className="orca-map h-full w-full">
       <MapContainer
@@ -198,6 +238,11 @@ export default function LeafletMap({
             }}
             position={[zone.latitude, zone.longitude]}
             icon={zoneIcon(zone)}
+            eventHandlers={{
+              click: () => {
+                loadZoneSafety(zone.zone_id);
+              },
+            }}
           >
             <Popup>
               <div className="w-48 space-y-2">
@@ -233,7 +278,11 @@ export default function LeafletMap({
                   <div>
                     <p className="text-muted-foreground">Safety</p>
                     <p className="text-shell">
-                      {zone.safety_score != null ? `${zone.safety_score.toFixed(1)}/100` : "N/A"}
+                      {zoneSafetyLoading[zone.zone_id.toUpperCase()]
+                        ? "Loading..."
+                        : zoneSafety[zone.zone_id.toUpperCase()] != null
+                          ? `${zoneSafety[zone.zone_id.toUpperCase()]!.toFixed(1)}/100`
+                          : "Unavailable"}
                     </p>
                   </div>
                 </div>
