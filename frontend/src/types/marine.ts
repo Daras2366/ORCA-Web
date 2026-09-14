@@ -19,6 +19,7 @@ export interface FishingZone {
   chlorophyll_mg_m3?: number | null;
   safety_score?: number | null;
   confidence: number;
+    distance_km?: number | null;
 }
 
 export interface OceanMetric {

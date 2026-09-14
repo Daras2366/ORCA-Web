@@ -268,7 +268,9 @@ function Page() {
     () =>
       zones.map((z) => ({
         zone: z,
-        distanceKm: haversineKm(location.latitude, location.longitude, z.latitude, z.longitude),
+        distanceKm:
+          z.distance_km ??
+          haversineKm(location.latitude, location.longitude, z.latitude, z.longitude),
       })),
     [zones, location],
   );

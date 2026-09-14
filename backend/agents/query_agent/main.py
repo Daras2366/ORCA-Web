@@ -253,12 +253,30 @@ def save_conversation_context(
             )
         ),
         "zone_id": result.get("zone_id"),
+        "comparison_zones": (
+            result.get("comparison_zones", [])
+            if isinstance(
+                result.get("comparison_zones", []),
+                list
+            )
+            else []
+        ),
         "decision": None,
         "fishing_score": None,
         "safety_risk_level": None,
         "safety_risk_score": None,
         "route": {},
         "required_agents": context_agents,
+        "action": (
+            parsed.get("gemini_plan", {}).get(
+                "action"
+            )
+            if isinstance(
+                parsed.get("gemini_plan", {}),
+                dict
+            )
+            else None
+        ),
     }
 
     decision = result.get("decision")
@@ -406,8 +424,15 @@ def call(url,payload,timeout=5):
     except Exception as e:return {"status":"error","message":str(e)}
 
 def ocean(z):
+    """
+    Get canonical PFZ ocean/fishing data for the AI assistant.
+
+    This intentionally uses /ocean/zone rather than the general
+    live /ocean/analyze endpoint so zone-specific assistant
+    answers remain consistent with the fishing-zone map.
+    """
     return call(
-        f"{OCEAN_API}/ocean/analyze",
+        f"{OCEAN_API}/ocean/zone",
         {"zone_id": z},
         30
     )
@@ -438,6 +463,18 @@ def safest_time(z):
         {"zone_id": z},
         60
     )
+    
+# =========================================================
+# DASHBOARD RECOMMENDATION SETTINGS
+# =========================================================
+# ORCA should not recommend a fishing zone that is
+# extremely far from the vessel merely because it has
+# the highest fishing HSI.
+#
+# This is a practical candidate radius for the dashboard
+# recommendation. Users can still search/view zones
+# outside this radius.
+RECOMMENDATION_RADIUS_KM = 150.0
 
 def parse(q):
     t=q.lower().strip()
@@ -470,6 +507,7 @@ def parse(q):
     elif "safest time" in t or ("what time" in t and "safe" in t): qt="safest_time"
     elif "tomorrow" in t and any(w in t for w in ["safe","safety","risk","wind","wave"]): qt="tomorrow_safety"
     elif "tomorrow" in t and "fishing" in t: qt="tomorrow_fishing"
+    elif "tomorrow" in t: qt="tomorrow_forecast"
     elif ("wave" in t and ("safe" in t or "condition" in t or "height" in t or "period" in t)): qt="wave_safety"
     elif ("wind" in t and ("safe" in t or "condition" in t or "speed" in t)): qt="wind_safety"
     elif "cyclone" in t or "storm risk" in t: qt="cyclone_risk"
@@ -485,7 +523,21 @@ def parse(q):
     elif "favourable sst" in t or "favorable sst" in t: qt="favourable_sst"
     elif "favourable chlorophyll" in t or "favorable chlorophyll" in t: qt="favourable_chlorophyll"
     elif "best combination" in t or ("pfz" in t and "sst" in t and "chlorophyll" in t): qt="best_combination"
-    elif z2 and ("better for fishing" in t or "better for" in t or "why" in t): qt="fishing_comparison"
+    elif z2 and (
+        "compare" in t
+        or "comparison" in t
+        or "versus" in t
+        or " vs " in f" {t} "
+    ):
+        qt = "comparison"
+
+    elif z2 and (
+        "better for fishing" in t
+        or "better for" in t
+        or "which is better" in t
+        or "why" in t
+    ):
+        qt = "fishing_comparison"
     elif dist is not None and (
         "within" in t
         or "radius" in t
@@ -535,6 +587,199 @@ def nearest(lat, lon):
     ]
 
     return x.sort_values("_d").iloc[0]
+
+RECOMMENDATION_RADIUS_KM = 150.0
+
+
+def get_recommended_zone(latitude=None, longitude=None):
+    """
+    Single source of truth for ORCA's recommended fishing zone.
+
+    Rules:
+    1. If vessel location is available:
+       - calculate actual distance to every PFZ
+       - keep PFZs within the recommendation radius
+       - choose the highest fishing HSI among them
+       - if none are inside the radius, choose the nearest PFZ
+    2. If no vessel location is available:
+       - choose the highest-HSI PFZ globally
+
+    This function must be used by BOTH:
+    - Dashboard /api/fishing-zones
+    - AI Assistant
+    """
+
+    raw = df().copy()
+
+    if "pfz_label" in raw.columns:
+        pfz = raw[raw["pfz_label"] == 1].copy()
+
+        if not pfz.empty:
+            raw = pfz
+
+    if raw.empty:
+        return None
+
+    candidates = []
+
+    for _, r in raw.iterrows():
+
+        zone_id = str(r.zone_id)
+
+        # --------------------------------------------------
+        # Calculate the SAME fishing score used by ORCA
+        # --------------------------------------------------
+
+        chl = pd.to_numeric(
+            r.get("chlorophyll_mean"),
+            errors="coerce"
+        )
+
+        sst = pd.to_numeric(
+            r.get("sst_c"),
+            errors="coerce"
+        )
+
+        cur = pd.to_numeric(
+            r.get("current_speed_ms"),
+            errors="coerce"
+        )
+
+        components = []
+
+        if pd.notna(chl):
+            chl_score = max(
+                0,
+                min(
+                    1,
+                    (float(chl) - 0.05) / (0.50 - 0.05)
+                )
+            )
+
+            components.append(
+                ("chlorophyll", chl_score, 0.40)
+            )
+
+        if pd.notna(sst):
+            sst_score = max(
+                0,
+                1 - abs(float(sst) - 28) / 5
+            )
+
+            components.append(
+                ("sst", sst_score, 0.30)
+            )
+
+        if pd.notna(cur):
+            current_score = max(
+                0,
+                min(
+                    1,
+                    1 - abs(float(cur) - 0.5) / 0.5
+                )
+            )
+
+            components.append(
+                ("current", current_score, 0.30)
+            )
+
+        fishing_score = (
+            sum(
+                value * weight
+                for _, value, weight in components
+            )
+            / sum(
+                weight
+                for _, value, weight in components
+            )
+            if components
+            else 0
+        )
+
+        # --------------------------------------------------
+        # Actual vessel distance
+        # --------------------------------------------------
+
+        distance_km = None
+
+        if (
+            latitude is not None
+            and longitude is not None
+            and pd.notna(r.latitude)
+            and pd.notna(r.longitude)
+        ):
+            distance_km = hav(
+                float(latitude),
+                float(longitude),
+                float(r.latitude),
+                float(r.longitude)
+            )
+
+        candidates.append({
+            "zone_id": zone_id,
+            "latitude": float(r.latitude),
+            "longitude": float(r.longitude),
+            "fishing_score": round(
+                fishing_score,
+                4
+            ),
+            "distance_km": (
+                round(distance_km, 2)
+                if distance_km is not None
+                else None
+            )
+        })
+
+    # --------------------------------------------------
+    # LOCATION AVAILABLE
+    # --------------------------------------------------
+
+    if latitude is not None and longitude is not None:
+
+        nearby = [
+            z
+            for z in candidates
+            if (
+                z["distance_km"] is not None
+                and z["distance_km"]
+                <= RECOMMENDATION_RADIUS_KM
+            )
+        ]
+
+        if nearby:
+
+            # Highest fishing potential among
+            # reachable/nearby candidates.
+            nearby.sort(
+                key=lambda z: (
+                    z["fishing_score"],
+                    -z["distance_km"]
+                ),
+                reverse=True
+            )
+
+            return nearby[0]
+
+        # No PFZ inside radius:
+        # choose nearest rather than a distant
+        # high-HSI zone.
+        return min(
+            candidates,
+            key=lambda z: (
+                z["distance_km"]
+                if z["distance_km"] is not None
+                else float("inf")
+            )
+        )
+
+    # --------------------------------------------------
+    # NO LOCATION
+    # --------------------------------------------------
+
+    return max(
+        candidates,
+        key=lambda z: z["fishing_score"]
+    )
 
 def direct_ocean_ranking(qt):
     x=df().copy()
@@ -587,23 +832,22 @@ def run_multi_agent_plan(p, gemini_plan, target_z=None):
     # For fishing recommendations without an explicit zone,
     # first use the Ocean Agent data to find the strongest zone.
     if "ocean" in required_agents and not zone_id:
+        recommended = get_recommended_zone(
+            p.get("latitude"),
+            p.get("longitude")
+        )
 
-        ocean_ranking = direct_ocean_ranking("highest_fishing")
-
-        if not ocean_ranking:
+        if recommended is None:
             return {
                 "status": "error",
                 "mode": "multi_agent",
                 "parsed": p,
-                "message": "No ocean observations are available."
+                "message": (
+                    "No ocean observations are available."
+                )
             }
 
-        ocean_ranking.sort(
-            key=lambda x: x.get("fishing_score", 0),
-            reverse=True
-        )
-
-        zone_id = ocean_ranking[0]["zone_id"]
+        zone_id = recommended["zone_id"]
 
     # If there is no fishing request but safety/route needs
     # a zone, use the nearest zone to the user's location.
@@ -1090,6 +1334,35 @@ def query(req: QueryRequest):
             "what are the waves like",
             "what are the waves like?",
         }
+        
+        comparison_zones = conversation_context.get(
+            "comparison_zones",
+            []
+        )
+
+        if (
+            short_followup in {
+                "which one is safer",
+                "which one is safer?",
+                "which is safer",
+                "which is safer?",
+            }
+            and isinstance(comparison_zones, list)
+            and len(comparison_zones) >= 2
+        ):
+
+            p["zone_id"] = comparison_zones[0]
+
+            p["comparison_zone"] = comparison_zones[1]
+
+            p["query_type"] = "safety_comparison"
+
+            gemini_agents = list(
+                dict.fromkeys(
+                    gemini_agents
+                    + ["safety"]
+                )
+            )
 
         if (short_followup in followup_phrases and context_zone):
             if not p.get("zone_id"):
@@ -1272,6 +1545,127 @@ def query(req: QueryRequest):
                     f"but its current fishing potential is unavailable."
                 )
             }
+            
+    # =========================================================
+    # GENERIC TOMORROW FORECAST
+    # =========================================================
+
+    if qt == "tomorrow_forecast":
+
+        forecast_zone = z or target_z
+
+        if not forecast_zone:
+
+            return {
+                "status": "needs_location",
+                "mode": qt,
+                "parsed": p,
+                "answer": (
+                    "Please provide a PFZ zone or allow "
+                    "location access so I can check tomorrow's "
+                    "marine conditions."
+                )
+            }
+
+        f = forecast(
+            forecast_zone
+        )
+
+        if f.get("status") != "success":
+
+            return {
+                "status": "error",
+                "mode": qt,
+                "parsed": p,
+                "message": f.get(
+                    "message",
+                    "Tomorrow's forecast is unavailable."
+                ),
+                "answer": (
+                    f"Tomorrow's marine forecast for "
+                    f"{forecast_zone} is currently unavailable."
+                )
+            }
+
+        hourly = f.get(
+            "hourly_forecast",
+            []
+        )
+
+        if not hourly:
+
+            return {
+                "status": "success",
+                "mode": qt,
+                "zone_id": forecast_zone,
+                "answer": (
+                    f"No hourly marine forecast is currently "
+                    f"available for {forecast_zone} tomorrow."
+                )
+            }
+
+        wave_values = [
+            float(h["wave_height_m"])
+            for h in hourly
+            if h.get("wave_height_m") is not None
+        ]
+
+        wind_values = [
+            float(h["wind_speed_ms"])
+            for h in hourly
+            if h.get("wind_speed_ms") is not None
+        ]
+
+        wave_min = (
+            min(wave_values)
+            if wave_values
+            else None
+        )
+
+        wave_max = (
+            max(wave_values)
+            if wave_values
+            else None
+        )
+
+        wind_min = (
+            min(wind_values)
+            if wind_values
+            else None
+        )
+
+        wind_max = (
+            max(wind_values)
+            if wind_values
+            else None
+        )
+
+        answer_parts = [
+            f"Tomorrow's marine forecast for "
+            f"{forecast_zone} is available for "
+            f"{len(hourly)} hours."
+        ]
+
+        if wave_min is not None and wave_max is not None:
+            answer_parts.append(
+                f"Wave height ranges from "
+                f"{wave_min:.1f} to {wave_max:.1f} m."
+            )
+
+        if wind_min is not None and wind_max is not None:
+            answer_parts.append(
+                f"Wind speed ranges from "
+                f"{wind_min:.1f} to {wind_max:.1f} m/s."
+            )
+
+        return {
+            "status": "success",
+            "mode": qt,
+            "zone_id": forecast_zone,
+            "forecast_date": hourly[0]["time"][:10],
+            "hourly_forecast": hourly,
+            "answer": " ".join(answer_parts)
+        }
 
     if qt=="tomorrow_safety":
         if not z:
@@ -1304,6 +1698,56 @@ def query(req: QueryRequest):
         return {"status":"success","mode":qt,"zone_id":z,"date":f["date"],"safest_time":f["safest_time"],
                 "forecast_safety_score":f["forecast_safety_score"],"forecast_safety_level":f["forecast_safety_level"],
                 "conditions":f["conditions"],"answer":f"Tomorrow the safest time for {z} is {f['safest_time'][-5:]}. Safety score: {f['forecast_safety_score']}/100 ({f['forecast_safety_level']})."}
+
+    # ---------------------------------------------------------
+    # USER-FACING "BEST FISHING ZONE"
+    # ---------------------------------------------------------
+    #
+    # When the user asks "which fishing zone is best",
+    # use the same recommendation logic as the dashboard.
+    #
+    # This prevents the assistant from recommending a
+    # different PFZ from the dashboard.
+    # ---------------------------------------------------------
+
+    if qt == "highest_fishing":
+        recommended = get_recommended_zone(
+            p.get("latitude"),
+            p.get("longitude")
+        )
+
+        if recommended is None:
+            return {
+                "status": "success",
+                "mode": "highest_fishing",
+                "answer": (
+                    "No fishing zones are currently "
+                    "available."
+                )
+            }
+
+        zone_id = recommended["zone_id"]
+
+        return {
+            "status": "success",
+            "mode": "recommended_fishing_zone",
+            "recommended_zone": zone_id,
+            "distance_km": recommended["distance_km"],
+            "fishing_score": recommended["fishing_score"],
+            "answer": (
+                f"The recommended fishing zone is "
+                f"{zone_id}. "
+                f"It has a fishing score of "
+                f"{recommended['fishing_score']:.2f}"
+                + (
+                    f" and is approximately "
+                    f"{recommended['distance_km']:.1f} km "
+                    f"from your location."
+                    if recommended["distance_km"] is not None
+                    else "."
+                )
+            )
+        }
 
     # Ocean rankings without 337 HTTP calls
     if qt in [
@@ -1475,32 +1919,209 @@ def query(req: QueryRequest):
         }
 
     # Specific comparisons
-    if z2 and qt in ["fishing_comparison","safety_comparison"]:
-        a=ocean(z); b=ocean(z2) if qt=="fishing_comparison" else None
-        sa=safety(z); sb=safety(z2)
-        if qt=="fishing_comparison":
-            av=a.get("fishing_score",0); bv=b.get("fishing_score",0)
-            winner=z if av>=bv else z2
-            return {"status":"success","mode":qt,"zones":[{"zone_id":z,"ocean":a},{"zone_id":z2,"ocean":b}],
-                    "winner":winner,"answer":f"{winner} is better for fishing: fishing score {av if winner==z else bv:.4f} versus {bv if winner==z else av:.4f}."}
-        ar=sa.get("risk_score",1); br=sb.get("risk_score",1); winner=z if ar<=br else z2
-        
-        winner_score = ar if winner == z else br
-        loser = z2 if winner == z else z
-        loser_score = br if winner == z else ar
+    # =========================================================
+    # SPECIFIC COMPARISONS
+    # =========================================================
+    if z2 and qt in [
+        "comparison",
+        "fishing_comparison",
+        "safety_comparison"
+    ]:
 
+        # -----------------------------------------------------
+        # FISHING COMPARISON
+        # -----------------------------------------------------
+        if qt in [
+            "comparison",
+            "fishing_comparison"
+        ]:
+            a = ocean(z)
+            b = ocean(z2)
+
+            if (
+                a.get("status") != "success"
+                or b.get("status") != "success"
+            ):
+                return {
+                    "status": "error",
+                    "mode": qt,
+                    "parsed": p,
+                    "answer": (
+                        "I couldn't retrieve complete ocean "
+                        "data for both zones."
+                    )
+                }
+
+            av = a.get("fishing_score")
+            bv = b.get("fishing_score")
+
+            fishing_winner = None
+
+            if av is not None and bv is not None:
+                fishing_winner = (
+                    z
+                    if float(av) >= float(bv)
+                    else z2
+                )
+
+        else:
+            a = None
+            b = None
+            av = None
+            bv = None
+            fishing_winner = None
+
+        # -----------------------------------------------------
+        # SAFETY COMPARISON
+        # -----------------------------------------------------
+        if qt in [
+            "comparison",
+            "safety_comparison"
+        ]:
+            sa = safety(z)
+            sb = safety(z2)
+
+            if (
+                sa.get("status") != "success"
+                or sb.get("status") != "success"
+            ):
+                return {
+                    "status": "error",
+                    "mode": qt,
+                    "parsed": p,
+                    "answer": (
+                        "I couldn't retrieve complete safety "
+                        "data for both zones."
+                    )
+                }
+
+            ar = sa.get("risk_score")
+            br = sb.get("risk_score")
+
+            safety_winner = None
+
+            if ar is not None and br is not None:
+                safety_winner = (
+                    z
+                    if float(ar) <= float(br)
+                    else z2
+                )
+
+        else:
+            sa = None
+            sb = None
+            ar = None
+            br = None
+            safety_winner = None
+
+        # -----------------------------------------------------
+        # FISHING-ONLY COMPARISON
+        # -----------------------------------------------------
+        if qt == "fishing_comparison":
+            winner_score = (
+                av
+                if fishing_winner == z
+                else bv
+            )
+
+            return {
+                "status": "success",
+                "mode": qt,
+                "zones": [
+                    {
+                        "zone_id": z,
+                        "ocean": a
+                    },
+                    {
+                        "zone_id": z2,
+                        "ocean": b
+                    }
+                ],
+                "comparison_zones": [
+                    z,
+                    z2
+                ],
+                "winner": fishing_winner,
+                "answer": (
+                    f"{fishing_winner} is better for fishing "
+                    f"with a fishing score of "
+                    f"{float(winner_score):.2f}."
+                )
+            }
+
+        # -----------------------------------------------------
+        # SAFETY-ONLY COMPARISON
+        # -----------------------------------------------------
+        if qt == "safety_comparison":
+            winner_score = (
+                ar
+                if safety_winner == z
+                else br
+            )
+
+            return {
+                "status": "success",
+                "mode": qt,
+                "zones": [
+                    {
+                        "zone_id": z,
+                        "safety": sa
+                    },
+                    {
+                        "zone_id": z2,
+                        "safety": sb
+                    }
+                ],
+                "comparison_zones": [
+                    z,
+                    z2
+                ],
+                "winner": safety_winner,
+                "answer": (
+                    f"{safety_winner} is safer, with a "
+                    f"risk score of "
+                    f"{float(winner_score):.2f}."
+                )
+            }
+
+        # -----------------------------------------------------
+        # GENERAL COMPARISON
+        # -----------------------------------------------------
         return {
             "status": "success",
-            "mode": qt,
+            "mode": "comparison",
+
             "zones": [
-                {"zone_id": z, "safety": sa},
-                {"zone_id": z2, "safety": sb}
+                {
+                    "zone_id": z,
+                    "ocean": a,
+                    "safety": sa
+                },
+                {
+                    "zone_id": z2,
+                    "ocean": b,
+                    "safety": sb
+                }
             ],
-            "winner": winner,
+
+            "comparison_zones": [
+                z,
+                z2
+            ],
+
+            "fishing_winner":
+                fishing_winner,
+
+            "safety_winner":
+                safety_winner,
+
             "answer": (
-                f"🛡️ {winner} is safer.\n\n"
-                f"• {winner}: risk score {winner_score:.4f}\n"
-                f"• {loser}: risk score {loser_score:.4f}"
+                f"For fishing, {fishing_winner} has the stronger "
+                f"fishing score ({float(av):.2f} vs "
+                f"{float(bv):.2f}). "
+                f"For safety, {safety_winner} has the lower "
+                f"risk score ({float(ar):.2f} vs "
+                f"{float(br):.2f})."
             )
         }
 
@@ -2569,6 +3190,30 @@ def get_fishing_zones(
             safety_score = safety_by_zone.get(
                 zone_id.upper()
             )
+            
+            # ---------------------------------------------------------
+            # ACTUAL VESSEL → PFZ DISTANCE
+            #
+            # IMPORTANT:
+            # Do NOT use r["pfz_distance_km"] here.
+            # That is a PFZ dataset attribute, not the distance
+            # from the user's current vessel position.
+            # ---------------------------------------------------------
+
+            vessel_distance_km = None
+
+            if (
+                latitude is not None
+                and longitude is not None
+                and pd.notna(r.latitude)
+                and pd.notna(r.longitude)
+            ):
+                vessel_distance_km = hav(
+                    float(latitude),
+                    float(longitude),
+                    float(r.latitude),
+                    float(r.longitude)
+                )
 
             zones_response.append({
                 "zone_id": zone_id,
@@ -2589,31 +3234,55 @@ def get_fishing_zones(
                 ),
                 "safety_score": safety_by_zone.get(str(r.zone_id).upper()),
                 "confidence": round(confidence, 2),
-                "fishing_score": round(fishing_score, 4)
+                "fishing_score": round(fishing_score, 4),
+                "distance_km": (
+                    round(float(vessel_distance_km), 2)
+                    if vessel_distance_km is not None
+                    else None
+                )
             })
 
         # ---------------------------------------------------------
-        # RECOMMEND BEST FISHING ZONE
+        # RECOMMEND BEST FISHING ZONE NEAR THE VESSEL
         # ---------------------------------------------------------
-        if zones_response:
-            zones_response.sort(
-                key=lambda z: z["fishing_score"],
-                reverse=True
-            )
+        #
+        # The dashboard recommendation must consider the vessel's
+        # actual location.
+        #
+        # We first restrict candidates to a practical radius.
+        # Within that radius, the highest fishing HSI wins.
+        #
+        # Zones outside the radius remain visible on the map.
+        # They simply cannot become the dashboard's recommendation.
+        # ---------------------------------------------------------
 
-            zones_response[0]["recommended"] = True
+        recommended_zone_id = None
 
-            recommended_zone_id = (
-                zones_response[0]["zone_id"]
-            )
+        recommended = get_recommended_zone(
+            latitude,
+            longitude
+        )
 
-        else:
-            recommended_zone_id = None
+        if recommended:
+            recommended_zone_id = recommended["zone_id"]
+
+            for zone in zones_response:
+                if zone["zone_id"] == recommended_zone_id:
+                    zone["recommended"] = True
+                    break
 
         return {
             "status": "success",
             "zones": zones_response,
-            "recommended_zone_id": recommended_zone_id
+            "recommended_zone_id": recommended_zone_id,
+            "recommendation_radius_km": RECOMMENDATION_RADIUS_KM,
+            "recommendation_basis":
+                (
+                    "highest fishing potential within "
+                    f"{RECOMMENDATION_RADIUS_KM:.0f} km of vessel"
+                    if latitude is not None and longitude is not None
+                    else "highest fishing potential"
+                )
         }
 
     except Exception as e:

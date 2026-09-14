@@ -10,6 +10,19 @@ VALID_INTENTS = {
     "general",
 }
 
+VALID_ACTIONS = {
+    "recommend",
+    "compare",
+    "explain",
+    "check",
+    "measure",
+    "forecast",
+    "locate",
+    "navigate",
+    "list",
+    "general",
+}
+
 VALID_AGENTS = {
     "ocean",
     "safety",
@@ -274,6 +287,7 @@ Return exactly this JSON structure:
 {{
     "language": "en",
     "intent": "fishing",
+    "action": "recommend",
     "required_agents": [
         "ocean",
         "safety",
@@ -346,6 +360,49 @@ Previous context:
 {json.dumps(conversation_context, indent=2, default=str)}
 
 ==================================================
+ACTION SELECTION
+==================================================
+
+Identify the user's primary action.
+
+Allowed actions:
+
+- recommend
+- compare
+- explain
+- check
+- measure
+- forecast
+- locate
+- navigate
+- list
+- general
+
+Examples:
+
+"Where should I fish?"
+→ intent: fishing
+→ action: recommend
+
+"Why is PFZ0319 better?"
+→ intent: fishing
+→ action: explain
+
+"Is PFZ0319 safe?"
+→ intent: safety
+→ action: check
+
+"How far is PFZ0319?"
+→ intent: route
+→ action: measure
+
+"Compare PFZ0319 and PFZ0201."
+→ action: compare
+
+"Can I go tomorrow?"
+→ action: forecast
+
+==================================================
 
 ==================================================
 USER QUERY
@@ -384,6 +441,18 @@ USER QUERY
 
         if intent not in VALID_INTENTS:
             intent = "general"
+            
+        # --------------------------------------------------
+        # Validate action
+        # --------------------------------------------------
+
+        action = result.get(
+            "action",
+            "general"
+        )
+
+        if action not in VALID_ACTIONS:
+            action = "general"
 
         # --------------------------------------------------
         # Validate agents
@@ -492,6 +561,7 @@ USER QUERY
         return {
             "language": language,
             "intent": intent,
+            "action": action,
             "required_agents": agents,
             "entities": normalized_entities,
             "requirements": normalized_requirements,
@@ -505,6 +575,7 @@ USER QUERY
         return {
             "language": "en",
             "intent": "general",
+            "action": "general",
             "required_agents": [],
             "entities": {},
             "requirements": {},

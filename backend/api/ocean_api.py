@@ -4,6 +4,7 @@ from pydantic import BaseModel
 import pandas as pd
 import numpy as np
 import os
+from math import radians, sin, cos, asin, sqrt
 
 from backend.agents.ocean_agent.live_ocean_adapter import get_live_ocean
 from backend.agents.ocean_agent.chlorophyll_adapter import get_chlorophyll
@@ -40,6 +41,38 @@ class OceanRequest(BaseModel):
     zone_id: str | None = None
     latitude: float | None = None
     longitude: float | None = None
+
+
+def haversine_km(
+    lat1: float,
+    lon1: float,
+    lat2: float,
+    lon2: float
+) -> float:
+
+    lat1, lon1, lat2, lon2 = map(
+        radians,
+        [
+            lat1,
+            lon1,
+            lat2,
+            lon2
+        ]
+    )
+
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+
+    a = (
+        sin(dlat / 2) ** 2
+        + cos(lat1)
+        * cos(lat2)
+        * sin(dlon / 2) ** 2
+    )
+
+    return 6371.0088 * 2 * asin(
+        sqrt(a)
+    )
 
 
 def value(row, *names):
@@ -243,15 +276,21 @@ def analyze_ocean(request: OceanRequest):
     )
 
     # --------------------------------------------------
-    # PFZ DISTANCE
+    # ACTUAL VESSEL → PFZ DISTANCE
     # --------------------------------------------------
     pfz_distance = None
 
-    if row is not None:
-        pfz_distance = value(
-            row,
-            "pfz_distance_km",
-            "distance_km"
+    if (
+        row is not None
+        and request.latitude is not None
+        and request.longitude is not None
+    ):
+
+        pfz_distance = haversine_km(
+            float(request.latitude),
+            float(request.longitude),
+            float(row["latitude"]),
+            float(row["longitude"])
         )
 
     # --------------------------------------------------
@@ -308,5 +347,161 @@ def analyze_ocean(request: OceanRequest):
             "chlorophyll_source": chlorophyll_data.get("source"),
             "chlorophyll_data_mode": chlorophyll_data.get("data_mode"),
             "pfz_distance_km": pfz_distance
+        }
+    }
+    
+# =========================================================
+# CANONICAL PFZ ZONE ANALYSIS
+# =========================================================
+#
+# This endpoint is used when ORCA needs to talk about a
+# specific PFZ zone shown on the fishing-zone map.
+#
+# The fishing metrics MUST come from the same unified PFZ
+# dataset used by /api/fishing-zones.
+#
+# Live wave conditions are included as supplementary data.
+# They do NOT replace the canonical SST/chlorophyll/current
+# values and do NOT change the fishing HSI.
+# =========================================================
+
+@app.post("/ocean/zone")
+def analyze_canonical_zone(request: OceanRequest):
+    zone_id = request.zone_id.strip() if request.zone_id else None
+
+    row = None
+
+    # -----------------------------------------------------
+    # Resolve zone
+    # -----------------------------------------------------
+    if zone_id:
+        rows = df[
+            df["zone_id"]
+            .astype(str)
+            .str.upper()
+            == zone_id.upper()
+        ]
+
+        if rows.empty:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Zone {zone_id} not found"
+            )
+
+        row = rows.iloc[0]
+
+    elif request.latitude is not None and request.longitude is not None:
+        distances = (
+            (df["latitude"] - request.latitude) ** 2
+            + (df["longitude"] - request.longitude) ** 2
+        )
+
+        idx = distances.idxmin()
+        row = df.loc[idx]
+        zone_id = str(row["zone_id"])
+
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Provide zone_id or latitude and longitude"
+        )
+
+    # -----------------------------------------------------
+    # CANONICAL PFZ VALUES
+    # These are exactly the values used by the map.
+    # -----------------------------------------------------
+    sst = value(row, "sst_c")
+    chlorophyll = value(row, "chlorophyll_mean")
+    current = value(row, "current_speed_ms")
+    pfz_distance = value(row, "pfz_distance_km", "distance_km")
+
+    # -----------------------------------------------------
+    # CANONICAL FISHING HSI
+    # -----------------------------------------------------
+    fishing_score, hsi = calculate_hsi(
+        chlorophyll=chlorophyll,
+        sst=sst,
+        current=current
+    )
+
+    # -----------------------------------------------------
+    # LIVE WAVE CONDITIONS
+    #
+    # These are supplementary only.
+    # They do NOT affect fishing_score.
+    # -----------------------------------------------------
+    live = {}
+
+    try:
+        latitude = float(row["latitude"])
+        longitude = float(row["longitude"])
+
+        live = get_live_ocean(
+            latitude,
+            longitude
+        )
+
+    except Exception as exc:
+
+        print(
+            f"[Ocean Zone] Live wave data unavailable "
+            f"for {zone_id}: {exc}"
+        )
+
+    return {
+        "agent": "Ocean Agent",
+        "status": "success",
+        "mode": "canonical_zone",
+        "data_mode": "canonical_pfz_plus_live_waves",
+        "zone_id": str(row["zone_id"]),
+        "location": {
+            "latitude": float(row["latitude"]),
+            "longitude": float(row["longitude"])
+        },
+
+        # -------------------------------------------------
+        # THIS IS THE AUTHORITATIVE FISHING SCORE
+        # -------------------------------------------------
+
+        "fishing_score": fishing_score,
+        "hsi_components": hsi,
+
+        "data_sources": {
+            "sst": "ORCA unified PFZ ocean dataset",
+            "chlorophyll": "ORCA unified PFZ ocean dataset",
+            "ocean_current": "ORCA unified PFZ ocean dataset",
+            "wave": "Open-Meteo"
+        },
+
+        "data_modes": {
+            "sst": "canonical",
+            "chlorophyll": "canonical",
+            "ocean_current": "canonical",
+            "wave": "live"
+        },
+
+        "evidence": {
+
+            # ---------------------------------------------
+            # CANONICAL MAP VALUES
+            # ---------------------------------------------
+            "sst_c": sst,
+            "chlorophyll_mean": chlorophyll,
+            "current_speed_ms": current,
+            "pfz_distance_km": pfz_distance,
+
+            # ---------------------------------------------
+            # LIVE SUPPLEMENTARY WAVE VALUES
+            # ---------------------------------------------
+            "wave_height_m": live.get("wave_height_m"),
+            "wave_period_s": live.get("wave_period_s"),
+            "wave_direction_deg": live.get("wave_direction_deg"),
+
+            # ---------------------------------------------
+            # Metadata
+            # ---------------------------------------------
+            "canonical_source": "backend/data/ocean/unified_ocean_current.csv",
+            "canonical_timestamp": None,
+            "live_wave_timestamp": live.get("timestamp")
         }
     }

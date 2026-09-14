@@ -418,7 +418,12 @@ def safety_ranking():
 
     try:
         t0 = time.time()
+
         live_data = get_live_conditions_bulk(points)
+
+        # Use the exact same lightning source used by
+        # individual /safety/analyze requests.
+        lightning_data = get_mosdac_lightning_risk_bulk(points)
 
     except Exception as e:
         live_error = str(e)
@@ -427,6 +432,8 @@ def safety_ranking():
             "[SAFETY] Live ranking failed:",
             e
         )
+
+        lightning_data = {}
 
     # --------------------------------------------------
     # BUILD RESULTS
@@ -444,7 +451,17 @@ def safety_ranking():
         # LIVE SCORE
         # ==================================================
         if live:
-            live["lightning"] = None
+            live["lightning"] = (
+                lightning_data.get(
+                    zone_id,
+                    {
+                        "available": False,
+                        "risk": None,
+                        "raw_lpi": None,
+                        "source": "MOSDAC Lightning Forecast -- unavailable",
+                    }
+                )
+            )
             
             risk_score = calculate_live_risk(live)
             risk_level = get_risk_level(risk_score)
@@ -474,6 +491,7 @@ def safety_ranking():
                     "rainfall_mm": live.get("precipitation_mm"),
                     "current_speed_ms": live.get("current_speed_ms"),
                     "cyclone": live.get("cyclone"),
+                    "lightning": live.get("lightning"),
                 }
             })
             continue

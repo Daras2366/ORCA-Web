@@ -218,63 +218,57 @@ def get_live_conditions_bulk(
                     point["longitude"]
                 )
 
-                results[zone_id] = {
+                data = {
                     "latitude": float(
                         point["latitude"]
                     ),
                     "longitude": float(
                         point["longitude"]
                     ),
+
                     "timestamp": (
                         mc.get("time")
                         or wc.get("time")
                     ),
-
-                    "wave_height_m":
-                        mc.get("wave_height"),
-
-                    "wave_period_s":
-                        mc.get("wave_period"),
-
-                    "wave_direction_deg":
-                        mc.get("wave_direction"),
+                    
+                    "wave_height_m": mc.get("wave_height"),
+                    "wave_period_s": mc.get("wave_period"),
+                    "wave_direction_deg": mc.get("wave_direction"),
 
                     "current_speed_ms":
                         _to_ms(
-                            mc.get(
-                                "ocean_current_velocity"
-                            )
+                            mc.get("ocean_current_velocity")
                         ),
 
-                    "current_direction_deg":
-                        mc.get(
-                            "ocean_current_direction"
-                        ),
-
-                    "sst_c":
-                        mc.get(
-                            "sea_surface_temperature"
-                        ),
-
-                    "wind_speed_kmh":
-                        wc.get(
-                            "wind_speed_10m"
-                        ),
-
-                    "wind_direction_deg":
-                        wc.get(
-                            "wind_direction_10m"
-                        ),
-
-                    "precipitation_mm":
-                        wc.get(
-                            "precipitation"
-                        ),
-
+                    "current_direction_deg": mc.get("ocean_current_direction"),
+                    "sst_c": mc.get("sea_surface_temperature"),
+                    "wind_speed_kmh": wc.get("wind_speed_10m"),
+                    "wind_direction_deg": wc.get("wind_direction_10m"),
+                    "precipitation_mm": wc.get("precipitation"),
                     "cyclone": cyclone,
 
                     "source": "Open-Meteo + GDACS",
                     "data_mode": "live"
+                }
+
+                results[zone_id] = data
+
+                # -----------------------------------------------------
+                # ALSO STORE THE BULK RESULT IN THE SINGLE-ZONE CACHE
+                #
+                # This makes /safety/ranking and /safety/analyze use
+                # the same marine/weather snapshot when called within
+                # the cache lifetime.
+                # -----------------------------------------------------
+
+                _single_cache_key = (
+                    round(float(point["latitude"]), 4),
+                    round(float(point["longitude"]), 4)
+                )
+
+                _single_cache[_single_cache_key] = {
+                    "time": now,
+                    "data": data
                 }
 
         except requests.HTTPError as e:
