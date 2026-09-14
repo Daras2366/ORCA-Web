@@ -212,18 +212,6 @@ export function NavigationPanel({ onRouteCalculated, userLocation, zones, initia
             Clear
           </Button>
         </div>
-
-        {/* Instructions */}
-        <div className="text-[11px] text-muted-foreground">
-          {selectedZone ? (
-            <p>
-              Route will be calculated from your current location to{" "}
-              <span className="text-shell font-medium">{selectedZone.zone_id}</span>.
-            </p>
-          ) : (
-            <p>Enter a PFZ ID shown on the map to use that fishing zone as your destination.</p>
-          )}
-        </div>
       </div>
     </div>
   );

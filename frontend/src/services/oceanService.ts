@@ -36,7 +36,7 @@ export interface OceanRawEvidence {
   sst_c: number | null;
   chlorophyll_mean: number | null;
   current_speed_ms: number | null;
-  pfz_distance_km: number | null;
+  wave_height_m: number | null;
   fishing_score: number | null;
 }
 
@@ -80,12 +80,12 @@ export async function getOceanConditions(location: UserLocation): Promise<OceanC
   const fmt = (v: number | null | undefined, decimals: number, unit: string) =>
     v != null ? `${v.toFixed(decimals)}${unit}` : "N/A";
 
-  const sst       = raw("sst_c");
-  const chl       = raw("chlorophyll_mean");
-  const cur       = raw("current_speed_ms");
-  const dist      = raw("pfz_distance_km");
-  const fscore    = response.fishing_score ?? null;
-  const zoneId    = response.zone_id ?? null;
+  const sst = raw("sst_c");
+  const chl = raw("chlorophyll_mean");
+  const cur = raw("current_speed_ms");
+  const waveHeight = raw("wave_height_m");
+  const fscore = response.fishing_score ?? null;
+  const zoneId = response.zone_id ?? null;
 
   const dataModes = response.data_modes ?? {};
 
@@ -135,11 +135,11 @@ export async function getOceanConditions(location: UserLocation): Promise<OceanC
   },
 ];
 
-  if (dist != null) {
+  if (waveHeight != null) {
     metrics.push({
-      key: "distance",
-      label: "Dist. to Zone",
-      value: fmt(dist, 1, " km"),
+      key: "waves",
+      label: "Wave Height",
+      value: fmt(waveHeight, 1, " m"),
       status: "",
     });
   }
@@ -154,7 +154,7 @@ export async function getOceanConditions(location: UserLocation): Promise<OceanC
     sst_c: sst,
     chlorophyll_mean: chl,
     current_speed_ms: cur,
-    pfz_distance_km: dist,
+    wave_height_m: waveHeight,
     fishing_score: fscore,
   };
 

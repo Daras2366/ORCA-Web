@@ -43,9 +43,6 @@ export function MarineMap({
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
         <div>
           <h2 className="text-sm font-semibold text-shell">Potential Fishing Zones</h2>
-          <p className="text-xs text-muted-foreground">
-            Zone centroids from ORCA backend — not official PFZ boundary polygons.
-          </p>
         </div>
         <Button variant="outline" size="sm" className="gap-2" disabled title="Coming soon">
           <Layers className="size-4" />

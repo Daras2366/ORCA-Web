@@ -1,4 +1,4 @@
-import { Droplets, Thermometer, Waves, Wind } from "lucide-react";
+import { Droplets, Gauge, Thermometer, Waves, Wind } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { OceanConditions as OceanConditionsData } from "@/types/marine";
@@ -6,6 +6,7 @@ import type { OceanConditions as OceanConditionsData } from "@/types/marine";
 const icons: Record<string, LucideIcon> = {
   sst: Thermometer,
   chlorophyll: Droplets,
+  current: Gauge,
   wind: Wind,
   waves: Waves,
 };
@@ -34,10 +35,7 @@ export function OceanConditions({ data, loading, error }: Props) {
           {data.metrics.map((metric) => {
             const Icon = icons[metric.key] ?? Waves;
             return (
-              <div
-                key={metric.key}
-                className="rounded-lg border border-border bg-deep px-3 py-3"
-              >
+              <div key={metric.key} className="rounded-lg border border-border bg-deep px-3 py-3">
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
                   <Icon className="size-4 text-accent" />
                   {metric.label}

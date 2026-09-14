@@ -3,13 +3,14 @@ import { useQuery } from "@tanstack/react-query";
 import {
   AlertCircle,
   Droplets,
+  Fish,
+  Gauge,
   Loader2,
   MapPin,
   RefreshCw,
   Thermometer,
   Waves,
   Wind,
-  Fish,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
@@ -45,8 +46,7 @@ export const Route = createFileRoute("/ocean-conditions")({
 const METRIC_ICONS: Record<string, LucideIcon> = {
   sst: Thermometer,
   chlorophyll: Droplets,
-  current: Waves,
-  distance: Fish,
+  current: Gauge,
   wind: Wind,
   waves: Waves,
 };
