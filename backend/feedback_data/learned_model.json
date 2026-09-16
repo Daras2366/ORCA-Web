@@ -1,0 +1,18 @@
+{
+  "model_version": "calibrated_v2",
+  "thresholds": {
+    "fishing": {
+      "good_min": 0.55,
+      "moderate_min": 0.25
+    },
+    "safety": {
+      "safe_max_risk": 0.4,
+      "moderate_max_risk": 0.7
+    }
+  },
+  "sample_count": 25,
+  "old_accuracy": 0.04,
+  "new_accuracy": 0.04,
+  "improvement": 0.0,
+  "timestamp": "2026-09-15T16:07:45.059534+00:00"
+}

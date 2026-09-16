@@ -81,12 +81,15 @@ export function RecommendedZone({ zone, factors, loading, error }: Props) {
             <Row label="Fishing potential (HSI)" value={zone ? zone.hsi.toFixed(2) : "—"} />
             <Row label="Potential level" value={zone?.potential ?? "—"} />
             <Row label="SST" value={zone?.sst_c != null ? `${zone.sst_c}°C` : "N/A"} />
-            <Row label="Chlorophyll" value={zone?.chlorophyll_mg_m3 != null ? `${zone.chlorophyll_mg_m3} mg/m³` : "N/A"} />
-            <Row label="Safety score" value={zone?.safety_score != null ? `${zone.safety_score}/100` : "N/A"} />
             <Row
-              label="Confidence"
-              value={zone ? `${Math.round(zone.confidence * 100)}%` : "—"}
+              label="Chlorophyll"
+              value={zone?.chlorophyll_mg_m3 != null ? `${zone.chlorophyll_mg_m3} mg/m³` : "N/A"}
             />
+            <Row
+              label="Safety score"
+              value={zone?.safety_score != null ? `${zone.safety_score}/100` : "N/A"}
+            />
+            <Row label="Confidence" value={zone ? `${Math.round(zone.confidence * 100)}%` : "—"} />
           </dl>
         </DialogContent>
       </Dialog>

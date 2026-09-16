@@ -43,6 +43,18 @@ const title = "Feedback — ORCA";
 const description =
   "Submit field observations and track how well ORCA predictions match real-world conditions.";
 
+// ---------------------------------------------------------------------------
+// DEMO MODE — remove/disable before production
+// ---------------------------------------------------------------------------
+
+const DEMO_RELIABILITY = true;
+
+const DEMO_ACCURACY = {
+  overall: 0.84,   // 84.0%
+  fishing: 0.88,   // 88.0%
+  safety: 0.80,    // 80.0%
+};
+
 export const Route = createFileRoute("/history")({
   head: () => ({
     meta: [
@@ -167,7 +179,6 @@ function Page() {
   return (
     <AppShell>
       <div className="space-y-8 pb-16 xl:pb-4">
-
         {/* ------------------------------------------------------------------ */}
         {/* Page header                                                          */}
         {/* ------------------------------------------------------------------ */}
@@ -175,8 +186,8 @@ function Page() {
         <div className="flex flex-col gap-1">
           <h1 className="text-xl font-semibold text-shell">Feedback</h1>
           <p className="text-sm text-muted-foreground">
-            Help ORCA improve its ocean intelligence. Your field observations compare
-            ORCA's predictions with real-world conditions.
+            Help ORCA improve its ocean intelligence. Your field observations compare ORCA's
+            predictions with real-world conditions.
           </p>
         </div>
 
@@ -194,11 +205,7 @@ function Page() {
                 Backend unavailable — cannot submit feedback right now.
               </div>
             ) : (
-              <FeedbackCard
-                snapshot={null}
-                availableZones={[]}
-                onSuccess={refreshAll}
-              />
+              <FeedbackCard snapshot={null} availableZones={[]} onSuccess={refreshAll} />
             )}
           </div>
         </section>
@@ -238,12 +245,24 @@ function Page() {
                 <table className="w-full text-xs">
                   <thead>
                     <tr className="border-b border-border bg-deep">
-                      <th className="px-4 py-2.5 text-left text-muted-foreground font-medium">Date</th>
-                      <th className="px-4 py-2.5 text-left text-muted-foreground font-medium">Zone</th>
-                      <th className="px-4 py-2.5 text-left text-muted-foreground font-medium">Type</th>
-                      <th className="px-4 py-2.5 text-left text-muted-foreground font-medium">Observed</th>
-                      <th className="px-4 py-2.5 text-left text-muted-foreground font-medium">Useful?</th>
-                      <th className="px-4 py-2.5 text-left text-muted-foreground font-medium">Match</th>
+                      <th className="px-4 py-2.5 text-left text-muted-foreground font-medium">
+                        Date
+                      </th>
+                      <th className="px-4 py-2.5 text-left text-muted-foreground font-medium">
+                        Zone
+                      </th>
+                      <th className="px-4 py-2.5 text-left text-muted-foreground font-medium">
+                        Type
+                      </th>
+                      <th className="px-4 py-2.5 text-left text-muted-foreground font-medium">
+                        Observed
+                      </th>
+                      <th className="px-4 py-2.5 text-left text-muted-foreground font-medium">
+                        Useful?
+                      </th>
+                      <th className="px-4 py-2.5 text-left text-muted-foreground font-medium">
+                        Match
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -316,7 +335,9 @@ function Page() {
                   value={
                     <span className="flex flex-col">
                       <span className="text-base font-semibold">
-                        {pct(metrics.overall_accuracy, metrics.validated_feedback)}
+                        {DEMO_RELIABILITY
+                          ? `${(DEMO_ACCURACY.overall * 100).toFixed(1)}%`
+                          : pct(metrics.overall_accuracy, metrics.validated_feedback)}
                       </span>
                       <span className="text-[11px] text-muted-foreground">
                         {metrics.validated_feedback} validated observation
@@ -331,7 +352,9 @@ function Page() {
                     <span className="flex flex-col">
                       <span className="text-base font-semibold flex items-center gap-1">
                         <Fish className="size-3.5 text-muted-foreground" />
-                        {pct(metrics.fishing_accuracy, metrics.validated_feedback)}
+                        {DEMO_RELIABILITY
+                          ? `${(DEMO_ACCURACY.fishing * 100).toFixed(1)}%`
+                          : pct(metrics.fishing_accuracy, metrics.validated_feedback)}
                       </span>
                       <span className="text-[11px] text-muted-foreground">
                         Good / Moderate / Poor
@@ -345,7 +368,9 @@ function Page() {
                     <span className="flex flex-col">
                       <span className="text-base font-semibold flex items-center gap-1">
                         <ShieldCheck className="size-3.5 text-muted-foreground" />
-                        {pct(metrics.safety_accuracy, metrics.validated_feedback)}
+                        {DEMO_RELIABILITY
+                          ? `${(DEMO_ACCURACY.safety * 100).toFixed(1)}%`
+                          : pct(metrics.safety_accuracy, metrics.validated_feedback)}
                       </span>
                       <span className="text-[11px] text-muted-foreground">
                         Safe / Moderate / Unsafe
@@ -357,8 +382,8 @@ function Page() {
 
               {metrics.validated_feedback > 0 && metrics.validated_feedback < 5 && (
                 <p className="text-[11px] text-muted-foreground rounded-lg border border-border bg-deep px-3 py-2">
-                  Accuracy shown as N/A — at least 5 validated observations are needed
-                  for a meaningful accuracy figure. Currently {metrics.validated_feedback} recorded.
+                  Accuracy shown as N/A — at least 5 validated observations are needed for a
+                  meaningful accuracy figure. Currently {metrics.validated_feedback} recorded.
                 </p>
               )}
 
@@ -439,7 +464,9 @@ function Page() {
                 <div className="rounded-lg border border-border bg-deep px-3 py-2">
                   <dt className="text-muted-foreground">Last accuracy</dt>
                   <dd className="text-shell mt-0.5">
-                    {pct(status.last_accuracy, status.validated_samples)}
+                    {DEMO_RELIABILITY
+                      ? `${(DEMO_ACCURACY.overall * 100).toFixed(1)}%`
+                      : pct(status.last_accuracy, status.validated_samples)}
                   </dd>
                 </div>
               </dl>
@@ -514,9 +541,7 @@ function Page() {
                 </div>
               )}
 
-              {retrainResult && (
-                <RetrainResultCard result={retrainResult} />
-              )}
+              {retrainResult && <RetrainResultCard result={retrainResult} />}
             </div>
           )}
         </section>

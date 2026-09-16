@@ -3286,6 +3286,46 @@ def get_fishing_zones(
                 if zone["zone_id"] == recommended_zone_id:
                     zone["recommended"] = True
                     break
+                
+        # ---------------------------------------------------------
+        # ADD LIVE SAFETY SCORES TO ALL PFZ ZONES
+        # ---------------------------------------------------------
+        # Safety Agent already provides a bulk ranking endpoint.
+        # Fetch it once and merge the result by zone_id.
+        # ---------------------------------------------------------
+
+        try:
+            safety_response = requests.get(
+                f"{SAFETY_API}/safety/ranking",
+                timeout=120
+            )
+
+            if safety_response.status_code == 200:
+                safety_data = safety_response.json()
+
+                safety_by_zone = {
+                    str(item["zone_id"]).upper(): item.get("safety_score")
+                    for item in safety_data.get("zones", [])
+                }
+
+                for zone in zones_response:
+                    safety_score = safety_by_zone.get(
+                        str(zone["zone_id"]).upper()
+                    )
+
+                    # Safety Agent returns safety_score as 0-1.
+                    # Frontend FishingZone expects 0-100.
+                    zone["safety_score"] = (
+                        round(float(safety_score) * 100, 1)
+                        if safety_score is not None
+                        else None
+                    )
+
+        except Exception as safety_error:
+            print(
+                "[FISHING-ZONES] Safety ranking unavailable:",
+                safety_error
+            )
 
         return {
             "status": "success",

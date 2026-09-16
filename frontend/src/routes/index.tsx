@@ -73,6 +73,8 @@ function Dashboard() {
   const zones = zonesQuery.data ?? [];
   const recommended = zones.find((z) => z.recommended) ?? zones[0];
 
+  const recommendedWithSafety = recommended;
+
   useEffect(() => {
     registerZones(zones.map((zone) => zone.zone_id));
   }, [zones, registerZones]);
@@ -85,18 +87,31 @@ function Dashboard() {
 
   // Build radar factors from real backend zone data (no mock fallback)
   const zoneFactors = useMemo<ZoneFactor[]>(() => {
-    if (!recommended) return [];
+    if (!recommendedWithSafety) return [];
+
     const factors: ZoneFactor[] = [
-      { factor: "Fishing (HSI)", score: Math.round(recommended.hsi * 100) },
+      {
+        factor: "Fishing (HSI)",
+        score: Math.round(recommendedWithSafety.hsi * 100),
+      },
     ];
-    if (recommended.safety_score != null) {
-      factors.push({ factor: "Safety", score: Math.round(recommended.safety_score) });
+
+    if (recommendedWithSafety.safety_score != null) {
+      factors.push({
+        factor: "Safety",
+        score: Math.round(recommendedWithSafety.safety_score),
+      });
     }
-    if (recommended.confidence != null) {
-      factors.push({ factor: "Confidence", score: Math.round(recommended.confidence * 100) });
+
+    if (recommendedWithSafety.confidence != null) {
+      factors.push({
+        factor: "Confidence",
+        score: Math.round(recommendedWithSafety.confidence * 100),
+      });
     }
+
     return factors;
-  }, [recommended]);
+  }, [recommendedWithSafety]);
 
   const selected = zones.find((z) => z.zone_id === detailZone);
 

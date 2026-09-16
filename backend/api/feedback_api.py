@@ -230,26 +230,82 @@ def _compute_prediction_match(
 # ---------------------------------------------------------------------------
 
 
-def _compute_metrics(records: list[dict]) -> dict:
+def _compute_metrics(records: list[dict], thresholds: dict) -> dict:
     total = len(records)
-    validated = [r for r in records if r.get("prediction_match") is not None]
 
-    matches = sum(1 for r in validated if r.get("prediction_match") is True)
-    mismatches = sum(1 for r in validated if r.get("prediction_match") is False)
+    validated = []
 
-    overall_accuracy = round(matches / len(validated), 4) if validated else None
+    for r in records:
+        prediction = r.get("original_prediction", {})
+        feedback_type = r.get("feedback_type")
+        observed_outcome = r.get("observed_outcome")
 
-    fishing_records = [r for r in validated if r.get("feedback_type") == "fishing"]
-    safety_records = [r for r in validated if r.get("feedback_type") == "safety"]
+        # Recalculate whether the prediction matches using
+        # the CURRENT calibration thresholds.
+        try:
+            snap = PredictionSnapshot(**prediction)
 
-    fishing_matches = sum(1 for r in fishing_records if r.get("prediction_match") is True)
-    safety_matches = sum(1 for r in safety_records if r.get("prediction_match") is True)
+            match = _compute_prediction_match(
+                feedback_type,
+                snap,
+                observed_outcome,
+                thresholds,
+            )
+
+            validated.append({
+                **r,
+                "prediction_match": match,
+            })
+
+        except Exception:
+            continue
+
+    matches = sum(
+        1 for r in validated
+        if r["prediction_match"] is True
+    )
+
+    mismatches = sum(
+        1 for r in validated
+        if r["prediction_match"] is False
+    )
+
+    overall_accuracy = (
+        round(matches / len(validated), 4)
+        if validated
+        else None
+    )
+
+    fishing_records = [
+        r for r in validated
+        if r.get("feedback_type") == "fishing"
+    ]
+
+    safety_records = [
+        r for r in validated
+        if r.get("feedback_type") == "safety"
+    ]
+
+    fishing_matches = sum(
+        1 for r in fishing_records
+        if r["prediction_match"] is True
+    )
+
+    safety_matches = sum(
+        1 for r in safety_records
+        if r["prediction_match"] is True
+    )
 
     fishing_accuracy = (
-        round(fishing_matches / len(fishing_records), 4) if fishing_records else None
+        round(fishing_matches / len(fishing_records), 4)
+        if fishing_records
+        else None
     )
+
     safety_accuracy = (
-        round(safety_matches / len(safety_records), 4) if safety_records else None
+        round(safety_matches / len(safety_records), 4)
+        if safety_records
+        else None
     )
 
     return {
@@ -384,9 +440,14 @@ def submit_feedback(request: FeedbackRequest):
 
 @router.get("/metrics")
 def get_metrics():
-    """Return overall and per-type accuracy metrics."""
+    """Return accuracy using the current calibration thresholds."""
     records = _load_all_feedback()
-    metrics = _compute_metrics(records)
+
+    model = _load_model()
+    thresholds = model.get("thresholds", DEFAULT_THRESHOLDS)
+
+    metrics = _compute_metrics(records, thresholds)
+
     return {"status": "success", **metrics}
 
 
@@ -507,6 +568,14 @@ def retrain_model():
             "timestamp": timestamp,
         }
     else:
+        current_model["sample_count"] = len(validated)
+        current_model["old_accuracy"] = old_accuracy
+        current_model["new_accuracy"] = new_accuracy
+        current_model["improvement"] = improvement
+        current_model["timestamp"] = timestamp
+
+        _save_model(current_model)
+
         return {
             "status": "retained",
             "message": "Previous calibration retained — no improvement.",
