@@ -641,8 +641,7 @@ export function AssistantPanel() {
         </form>
 
         <p className="mt-2 flex items-center gap-1.5 text-[11px] text-muted-foreground">
-          <MapPin className="size-3" />
-          Using your location for more accurate results
+          Login for personalized vessel safety recommendations. 
         </p>
       </div>
     </div>

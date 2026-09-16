@@ -3,6 +3,7 @@ import io
 import os
 import tempfile
 import wave
+import time
 
 from dotenv import load_dotenv
 from google import genai
@@ -32,171 +33,161 @@ def transcribe_audio(
     mime_type: str = "audio/webm",
 ) -> str:
     """
-    Convert microphone audio into text.
+    Transcribe short browser-recorded audio directly using Gemini.
 
-    Primary:
-        Gemini 3.5 Transcribe
-
-    Fallback:
-        The normal ORCA Gemini model with audio understanding.
+    Uses inline audio bytes instead of the Gemini Files API.
+    This avoids Files API PROCESSING/ACTIVE failures.
     """
 
     if not audio_bytes:
-        raise ValueError("Audio data is empty.")
+        raise ValueError("No audio data received.")
 
-    suffix = ".webm"
+    print(
+        f"ORCA Voice: received {len(audio_bytes)} bytes "
+        f"with MIME type {mime_type}"
+    )
 
-    if "wav" in mime_type:
-        suffix = ".wav"
-    elif "mp3" in mime_type or "mpeg" in mime_type:
-        suffix = ".mp3"
-    elif "ogg" in mime_type:
-        suffix = ".ogg"
-    elif "m4a" in mime_type or "mp4" in mime_type:
-        suffix = ".m4a"
+    # Gemini expects a proper audio MIME type.
+    # Browser MediaRecorder may send parameters such as:
+    # audio/webm;codecs=opus
+    clean_mime_type = mime_type.split(";")[0].strip().lower()
 
-    temp_path = None
+    # Normalize common browser MIME types.
+    if clean_mime_type == "audio/ogg":
+        clean_mime_type = "audio/ogg"
+    elif clean_mime_type == "audio/webm":
+        clean_mime_type = "audio/webm"
+    elif clean_mime_type == "audio/wav":
+        clean_mime_type = "audio/wav"
+    elif clean_mime_type == "audio/mp4":
+        clean_mime_type = "audio/mp4"
+    elif clean_mime_type == "audio/mpeg":
+        clean_mime_type = "audio/mpeg"
+    elif clean_mime_type == "audio/mp3":
+        clean_mime_type = "audio/mp3"
+    else:
+        print(
+            f"ORCA Voice: unknown MIME type {clean_mime_type}, "
+            "falling back to audio/webm"
+        )
+        clean_mime_type = "audio/webm"
 
     try:
-        with tempfile.NamedTemporaryFile(
-            suffix=suffix,
-            delete=False,
-        ) as temp:
-            temp.write(audio_bytes)
-            temp_path = temp.name
-
-        audio_file = client.files.upload(
-            file=temp_path
+        # Send the audio directly to Gemini.
+        audio_part = types.Part.from_bytes(
+            data=audio_bytes,
+            mime_type=clean_mime_type,
         )
 
-        # -------------------------------------------------
-        # PRIMARY: Gemini 3.5 Transcribe
-        # -------------------------------------------------
-        try:
-            print(
-                "ORCA Voice: trying Gemini 3.5 Transcribe..."
-            )
+        response = client.models.generate_content(
+            model="gemini-3.5-transcribe",
+            contents=[
+                audio_part,
+                """
+                Transcribe the spoken audio exactly.
 
-            response = client.models.generate_content(
-                model="gemini-3.5-transcribe",
-                contents=[audio_file],
-                config=types.GenerateContentConfig(
-                    audio_transcription_config=(
-                        types.AudioTranscriptionConfig(
-                            mode="VERBATIM",
-                            custom_vocabulary=[
-                                "ORCA",
-                                "PFZ",
-                                "fishing zone",
-                                "fishing zones",
-                                "sea surface temperature",
-                                "SST",
-                                "chlorophyll",
-                                "latitude",
-                                "longitude",
-                                "Indian Ocean",
-                                "Arabian Sea",
-                                "Bay of Bengal",
-                                "cyclone",
-                                "storm",
-                                "wind",
-                                "wave",
-                                "weather",
-                                "nautical",
-                                "navigation",
-                            ],
-                        )
-                    )
-                ),
-            )
+                Return ONLY the transcription text.
+                Do not explain the transcription.
+                Do not add quotation marks.
+                Preserve the language spoken by the user.
+                """,
+            ],
+            config=types.GenerateContentConfig(
+                audio_transcription_config=types.AudioTranscriptionConfig(
+                    mode="VERBATIM",
+                    custom_vocabulary=[
+                        "ORCA",
+                        "PFZ",
+                        "fishing zone",
+                        "fishing potential",
+                        "chlorophyll",
+                        "sea surface temperature",
+                        "SST",
+                        "cyclone",
+                        "wave height",
+                        "wind speed",
+                        "ocean current",
+                        "MOSDAC",
+                        "INCOIS",
+                        "Copernicus",
+                        "vessel",
+                        "route",
+                        "safety",
+                    ],
+                )
+            ),
+        )
 
-            text = (response.text or "").strip()
+        # Gemini 3.5 Transcribe may return the transcript
+        # inside an audio_transcription response part
+        # instead of response.text.
+        transcript = ""
+
+        parts = getattr(response, "parts", []) or []
+
+        for part in parts:
+            # Normal text response
+            text = getattr(part, "text", None)
 
             if text:
-                print(
-                    "ORCA Voice: Gemini Transcribe succeeded."
+                transcript += str(text).strip()
+
+            # Gemini transcription response
+            audio_transcription = getattr(
+                part,
+                "audio_transcription",
+                None,
+            )
+
+            if audio_transcription:
+                transcription_text = getattr(
+                    audio_transcription,
+                    "text",
+                    None,
                 )
-                return text
 
-        except Exception as transcribe_error:
+                if transcription_text:
+                    transcript += str(
+                        transcription_text
+                    ).strip()
+
+        transcript = transcript.strip()
+
+        # Fallback for SDK versions where response.text
+        # exposes the transcription normally.
+        if not transcript:
+            transcript = (
+                getattr(response, "text", "") or ""
+            ).strip()
+
+        if not transcript:
             print(
-                "ORCA Voice: Gemini Transcribe unavailable:"
+                "ORCA Voice: Gemini response contained "
+                "no transcript."
             )
-            print(transcribe_error)
 
-        # -------------------------------------------------
-        # FALLBACK: Existing ORCA Gemini model
-        # -------------------------------------------------
+            # Useful debugging information
+            print(
+                "ORCA Voice: response parts =",
+                getattr(response, "parts", None),
+            )
 
-        fallback_model = os.getenv(
-            "GEMINI_MODEL",
-            "gemini-3.5-flash-lite",
-        )
-
-        print(
-            f"ORCA Voice: using fallback model "
-            f"{fallback_model}..."
-        )
-
-        fallback_prompt = """
-You are a speech transcription system for the ORCA
-marine intelligence application.
-
-Transcribe the user's speech exactly as spoken.
-
-Important requirements:
-
-1. Return ONLY the transcription.
-2. Do not explain anything.
-3. Do not answer the user's question.
-4. Preserve the user's language.
-5. Preserve Hinglish/code-switching.
-6. Do not translate Hindi into English.
-7. Correctly recognize marine terminology such as:
-   PFZ, fishing zone, SST, chlorophyll,
-   latitude, longitude, Indian Ocean,
-   Arabian Sea, Bay of Bengal,
-   cyclone, storm, wind, waves,
-   weather and navigation.
-
-If the user says a Hindi/English mixed sentence,
-keep it mixed.
-
-Example:
-"Mujhe aaj ke fishing zones batao"
-
-should remain approximately:
-"Mujhe aaj ke fishing zones batao"
-"""
-
-        fallback_response = client.models.generate_content(
-            model=fallback_model,
-            contents=[
-                fallback_prompt,
-                audio_file,
-            ],
-        )
-
-        text = (fallback_response.text or "").strip()
-
-        if not text:
-            raise ValueError(
-                "Neither Gemini transcription model "
-                "nor fallback Gemini model returned text."
+            raise RuntimeError(
+                "Gemini returned an empty transcription."
             )
 
         print(
-            "ORCA Voice: fallback transcription succeeded."
+            f"ORCA Voice: transcription = {transcript}"
         )
 
-        return text
+        return transcript
 
-    finally:
-        if temp_path:
-            try:
-                os.remove(temp_path)
-            except OSError:
-                pass
+    except Exception as e:
+        print(
+            f"ORCA Gemini transcription error: "
+            f"{type(e).__name__}: {e}"
+        )
+        raise
             
             
 def synthesize_speech(text: str) -> bytes:
