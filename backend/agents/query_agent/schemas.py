@@ -6,6 +6,7 @@ class QueryRequest(BaseModel):
     latitude: float | None = None
     longitude: float | None = None
     conversation_id: str | None = None
+    vessel_id: str | None = None
 
 
 class ParsedQuery(BaseModel):

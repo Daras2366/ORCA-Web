@@ -14,6 +14,8 @@ export const endpoints = {
   route: "/api/route",
 } as const;
 
+const token = localStorage.getItem("orca_token");
+
 export async function apiGet<T>(path: string, params?: Record<string, string | number>): Promise<T> {
   const url = new URL(API_BASE_URL + path);
   Object.entries(params ?? {}).forEach(([k, v]) => url.searchParams.set(k, String(v)));
@@ -22,13 +24,28 @@ export async function apiGet<T>(path: string, params?: Record<string, string | n
   return (await res.json()) as T;
 }
 
-export async function apiPost<T>(path: string, body: unknown): Promise<T> {
+export async function apiPost<T>(
+  path: string,
+  body: unknown
+): Promise<T> {
+  const token = localStorage.getItem("orca_token");
+
   const res = await fetch(API_BASE_URL + path, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      ...(token
+        ? { Authorization: `Bearer ${token}` }
+        : {}),
+    },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(`Request failed: ${res.status}`);
+
+  if (!res.ok) {
+    throw new Error(`Request failed: ${res.status}`);
+  }
+
   return (await res.json()) as T;
 }
 

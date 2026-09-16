@@ -6,6 +6,7 @@ import numpy as np
 import os
 import time
 
+
 from backend.agents.safety_agent.live_marine_adapter import get_live_conditions, get_live_conditions_bulk
 from backend.agents.safety_agent.forecast_adapter import (
     get_tomorrow_forecast,
@@ -55,6 +56,7 @@ class SafetyRequest(BaseModel):
     zone_id: str
     latitude: float | None = None
     longitude: float | None = None
+    vessel: dict | None = None
 
 class ForecastRequest(BaseModel):
     zone_id: str | None = None
@@ -140,71 +142,237 @@ def calculate_risk(row):
         return None
 
     return round(float(sum(risks)), 4)
+
+def get_vessel_limits(vessel: dict | None) -> dict:
+    """
+    Return conservative operational weather limits for the vessel.
+
+    These are ORCA prototype operating-envelope heuristics,
+    not certified vessel limitations.
+    """
+
+    if not vessel:
+        return {
+            "wind_limit_ms": 15.0,
+            "wave_limit_m": 4.0,
+            "profile": "generic",
+        }
+
+    vessel_type = str(
+        vessel.get("vessel_type", "other")
+    ).lower()
+
+    length = vessel.get("length_m")
+
+    # Base limits by vessel class.
+    limits = {
+        "small_fishing_boat": {
+            "wind_limit_ms": 10.0,
+            "wave_limit_m": 1.5,
+        },
+        "gillnetter": {
+            "wind_limit_ms": 11.0,
+            "wave_limit_m": 1.8,
+        },
+        "longliner": {
+            "wind_limit_ms": 13.0,
+            "wave_limit_m": 2.5,
+        },
+        "trawler": {
+            "wind_limit_ms": 15.0,
+            "wave_limit_m": 3.0,
+        },
+        "purse_seiner": {
+            "wind_limit_ms": 16.0,
+            "wave_limit_m": 3.5,
+        },
+        "other": {
+            "wind_limit_ms": 13.0,
+            "wave_limit_m": 2.5,
+        },
+    }
+
+    selected = limits.get(
+        vessel_type,
+        limits["other"],
+    ).copy()
+
+    # Length adjustment.
+    # Larger vessels receive a modest increase in the
+    # prototype operating envelope.
+    if length is not None:
+        try:
+            length = float(length)
+
+            if length >= 20:
+                selected["wind_limit_ms"] += 2.0
+                selected["wave_limit_m"] += 0.8
+
+            elif length >= 12:
+                selected["wind_limit_ms"] += 1.0
+                selected["wave_limit_m"] += 0.4
+
+        except (TypeError, ValueError):
+            pass
+
+    selected["profile"] = vessel_type
+
+    return selected
     
-def calculate_live_risk(data):
+def calculate_live_risk(
+    data,
+    vessel: dict | None = None,
+):
     """
-    Weighted live risk score (0–1).
+    Calculate vessel-aware live risk score (0–1).
 
-    Target weights when ALL variables are available:
-      wind       20%
-      waves      20%
-      rainfall   10%
-      current    15%
-      cyclone    20%
-      lightning  15%
+    Lower vessel operating limits make the same environmental
+    conditions produce a higher risk score.
 
-    Variables that are missing (None / unavailable) are excluded
-    from both the numerator and the denominator so that the score
-    always normalises to the same 0–1 scale.
+    This is an ORCA prototype operational-risk heuristic,
+    not a certified vessel safety limit.
     """
-    # Base weights — must sum to 1.0 when all present
+
+    limits = get_vessel_limits(vessel)
+
+    wind_limit = limits["wind_limit_ms"]
+    wave_limit = limits["wave_limit_m"]
+
     WEIGHTS = {
-        "wind":      0.20,
-        "waves":     0.20,
-        "rainfall":  0.10,
-        "current":   0.15,
-        "cyclone":   0.20,
+        "wind": 0.20,
+        "waves": 0.20,
+        "rainfall": 0.10,
+        "current": 0.15,
+        "cyclone": 0.20,
         "lightning": 0.15,
     }
 
     weighted_sum = 0.0
     total_weight = 0.0
 
+    # --------------------------------------------------
+    # WIND — vessel specific
+    # --------------------------------------------------
+
     wind_kmh = data.get("wind_speed_kmh")
+
     if wind_kmh is not None:
-        weighted_sum += np.clip((wind_kmh / 3.6) / 15, 0, 1) * WEIGHTS["wind"]
+        wind_ms = float(wind_kmh) / 3.6
+
+        wind_risk = np.clip(
+            wind_ms / wind_limit,
+            0,
+            1,
+        )
+
+        weighted_sum += (
+            wind_risk * WEIGHTS["wind"]
+        )
+
         total_weight += WEIGHTS["wind"]
 
+    # --------------------------------------------------
+    # WAVES — vessel specific
+    # --------------------------------------------------
+
     wave = data.get("wave_height_m")
+
     if wave is not None:
-        weighted_sum += np.clip(wave / 4, 0, 1) * WEIGHTS["waves"]
+        wave_risk = np.clip(
+            float(wave) / wave_limit,
+            0,
+            1,
+        )
+
+        weighted_sum += (
+            wave_risk * WEIGHTS["waves"]
+        )
+
         total_weight += WEIGHTS["waves"]
 
+    # --------------------------------------------------
+    # RAINFALL
+    # --------------------------------------------------
+
     rainfall = data.get("precipitation_mm")
+
     if rainfall is not None:
-        weighted_sum += np.clip(rainfall / 10, 0, 1) * WEIGHTS["rainfall"]
+
+        rainfall_risk = np.clip(
+            float(rainfall) / 10,
+            0,
+            1,
+        )
+
+        weighted_sum += (
+            rainfall_risk *
+            WEIGHTS["rainfall"]
+        )
+
         total_weight += WEIGHTS["rainfall"]
 
+    # --------------------------------------------------
+    # CURRENT
+    # --------------------------------------------------
+
     current = data.get("current_speed_ms")
+
     if current is not None:
-        weighted_sum += np.clip(current / 2, 0, 1) * WEIGHTS["current"]
+
+        current_risk = np.clip(
+            float(current) / 2,
+            0,
+            1,
+        )
+
+        weighted_sum += (
+            current_risk *
+            WEIGHTS["current"]
+        )
+
         total_weight += WEIGHTS["current"]
 
+    # --------------------------------------------------
+    # CYCLONE
+    # --------------------------------------------------
+
     cyclone = data.get("cyclone")
+
     if cyclone and cyclone.get("available"):
-        weighted_sum += float(cyclone.get("risk", 0)) * WEIGHTS["cyclone"]
+
+        weighted_sum += (
+            float(cyclone.get("risk", 0))
+            * WEIGHTS["cyclone"]
+        )
+
         total_weight += WEIGHTS["cyclone"]
 
+    # --------------------------------------------------
+    # LIGHTNING
+    # --------------------------------------------------
+
     lightning = data.get("lightning")
-    if lightning and lightning.get("available") and lightning.get("risk") is not None:
-        weighted_sum += float(lightning["risk"]) * WEIGHTS["lightning"]
+
+    if (
+        lightning
+        and lightning.get("available")
+        and lightning.get("risk") is not None
+    ):
+
+        weighted_sum += (
+            float(lightning["risk"])
+            * WEIGHTS["lightning"]
+        )
+
         total_weight += WEIGHTS["lightning"]
 
     if total_weight == 0:
         return None
 
-    score = round(float(weighted_sum / total_weight), 4)
-    return score
+    return round(
+        float(weighted_sum / total_weight),
+        4,
+    )
 
 
 # ---------------------------------------------------------
@@ -315,7 +483,10 @@ def analyze_safety(request: SafetyRequest):
     # --------------------------------------------------
     # LIVE RISK
     # --------------------------------------------------
-    risk_score = calculate_live_risk(live)
+    risk_score = calculate_live_risk(
+        live,
+        request.vessel,
+    )
     risk_level = get_risk_level(risk_score)
 
     # --------------------------------------------------
@@ -345,6 +516,22 @@ def analyze_safety(request: SafetyRequest):
 
         "risk_score": risk_score,
         "risk_level": risk_level,
+        
+        "vessel_specific": request.vessel is not None,
+        "vessel_profile": (
+            {
+                "name": request.vessel.get("name"),
+                "vessel_type": request.vessel.get("vessel_type"),
+                "length_m": request.vessel.get("length_m"),
+                "engine_power_hp": request.vessel.get("engine_power_hp"),
+                "cruising_speed_kmh": request.vessel.get("cruising_speed_kmh"),
+            }
+            if request.vessel
+            else None
+        ),
+        "operating_limits": get_vessel_limits(
+            request.vessel
+        ),
 
         "evidence": {
             "wind_speed_ms": (

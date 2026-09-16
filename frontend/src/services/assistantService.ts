@@ -16,6 +16,7 @@ export async function queryAssistant(
   message: string,
   location: UserLocation,
   conversationId: string,
+  vesselId?: string | null,
 ): Promise<AssistantResponse> {
   const response = await apiPost<QueryResponse>(
     endpoints.query,
@@ -24,6 +25,7 @@ export async function queryAssistant(
       latitude: location.latitude,
       longitude: location.longitude,
       conversation_id: conversationId,
+      vessel_id: vesselId ?? null,
     },
   );
 

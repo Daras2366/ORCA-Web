@@ -6,6 +6,7 @@ import { OrcaLogo } from "./OrcaLogo";
 import { suggestedQuestions } from "@/data/mockData";
 import { useLocationContext } from "@/hooks/useLocation";
 import { useMapLocate } from "@/hooks/useMapLocate";
+import { useVessels } from "@/hooks/useVessels";
 import { extractZoneIds } from "@/lib/zoneIds";
 import { createConversationId, queryAssistant } from "@/services/assistantService";
 import type { ChatMessage } from "@/types/marine";
@@ -151,6 +152,7 @@ function AssistantMessageBody({ content }: { content: string }) {
 
 export function AssistantPanel() {
   const { location } = useLocationContext();
+  const { selectedVessel } = useVessels();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -443,7 +445,12 @@ export function AssistantPanel() {
     ]);
     setLoading(true);
     try {
-      const res = await queryAssistant(value, location, conversationId.current);
+      const res = await queryAssistant(
+        value,
+        location,
+        conversationId.current,
+        selectedVessel?.id ?? null,
+      );
       setMessages((prev) => [
         ...prev,
         { id: `${Date.now()}-a`, role: "assistant", content: res.reply, createdAt: Date.now() },

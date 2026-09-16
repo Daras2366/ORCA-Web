@@ -190,6 +190,14 @@ Clearly say that the user should not proceed.
 
 Do not soften a NO-GO recommendation.
 
+When a vessel profile is present in the safety result:
+- Treat the vessel-specific risk assessment as authoritative.
+- Explain that the recommendation is based on the selected vessel's characteristics and the current environmental conditions.
+- Mention the vessel type when relevant.
+- If operating limits are provided, briefly explain the relevant wind/wave constraint.
+- Do not claim that the vessel is absolutely safe or unsafe.
+- Do not invent vessel specifications or safety limits.
+
 ==================================================
 NATURAL CONVERSATION
 ==================================================

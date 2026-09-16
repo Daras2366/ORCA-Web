@@ -1,12 +1,13 @@
-from fastapi import FastAPI, HTTPException, File, UploadFile
+from fastapi import FastAPI, HTTPException, File, UploadFile, Depends
 from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
+
 from contextlib import asynccontextmanager
+
 from backend.agents.query_agent.schemas import QueryRequest, NavigateRequest
 from backend.gemini_client import ask_gemini, transcribe_audio, synthesize_speech
 from backend.agents.query_agent.gemini_planner import plan_query
 from backend.agents.query_agent.gemini_synthesizer import synthesize_answer
-from backend.api.feedback_api import router as feedback_router
 from backend.agents.routing_agent.routing.cache import (
     initialize_routing_cache,
     get_routing_cache,
@@ -14,6 +15,12 @@ from backend.agents.routing_agent.routing.cache import (
     get_cache_error,
 )
 from backend.agents.routing_agent.routing.service import run_route
+
+from backend.api.feedback_api import router as feedback_router
+
+from backend.auth.database import get_db
+from backend.auth.dependencies import get_optional_user
+from backend.auth.models import Vessel
 
 import requests, pandas as pd, re, os
 from datetime import datetime, timedelta
@@ -254,7 +261,11 @@ def save_conversation_context(
                 else None
             )
         ),
-        "zone_id": result.get("zone_id"),
+        "zone_id": (
+            result.get("zone_id")
+            or result.get("recommended_zone")
+            or parsed.get("zone_id")
+        ),
         "comparison_zones": (
             result.get("comparison_zones", [])
             if isinstance(
@@ -439,11 +450,18 @@ def ocean(z):
         30
     )
 
-def safety(z):
+def safety(z, vessel=None):
+    payload = {
+        "zone_id": z,
+    }
+
+    if vessel is not None:
+        payload["vessel"] = vessel
+
     return call(
         f"{SAFETY_API}/safety/analyze",
-        {"zone_id": z},
-        30
+        payload,
+        30,
     )
 
 def route(z):
@@ -852,7 +870,7 @@ def direct_ocean_ranking(qt):
                      "sst_c":float(ss) if pd.notna(ss) else None})
     return rows
 
-def run_multi_agent_plan(p, gemini_plan, target_z=None):
+def run_multi_agent_plan(p, gemini_plan, target_z=None, vessel=None):
     """
     Execute multiple ORCA specialist agents based on Gemini's plan.
 
@@ -936,7 +954,7 @@ def run_multi_agent_plan(p, gemini_plan, target_z=None):
             }
 
     if "safety" in required_agents:
-        safety_result = safety(zone_id)
+        safety_result = safety(zone_id, vessel)
 
         if safety_result.get("status") != "success":
             return {
@@ -1107,8 +1125,52 @@ def run_multi_agent_plan(p, gemini_plan, target_z=None):
 
 @app.post("/query")
 @app.post("/api/query")
-def query(req: QueryRequest):
+def query(
+    req: QueryRequest,
+    current_user=Depends(get_optional_user),
+    db=Depends(get_db),
+):
     q = req.query.strip()
+    
+    # ---------------------------------------------------------
+    # SELECTED VESSEL
+    # ---------------------------------------------------------
+
+    assistant_vessel = None
+
+    if req.vessel_id:
+
+        if current_user is None:
+            raise HTTPException(
+                status_code=401,
+                detail="Login is required to use a selected vessel.",
+            )
+
+        vessel_obj = (
+            db.query(Vessel)
+            .filter(
+                Vessel.id == req.vessel_id,
+                Vessel.user_id == current_user.id,
+            )
+            .first()
+        )
+
+        if vessel_obj is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Selected vessel was not found.",
+            )
+
+        assistant_vessel = {
+            "id": vessel_obj.id,
+            "name": vessel_obj.name,
+            "vessel_type": vessel_obj.vessel_type,
+            "length_m": vessel_obj.length_m,
+            "engine_type": vessel_obj.engine_type,
+            "engine_power_hp": vessel_obj.engine_power_hp,
+            "cruising_speed_kmh": vessel_obj.cruising_speed_kmh,
+            "fuel_capacity_l": vessel_obj.fuel_capacity_l,
+        }
 
     if not q:
         raise HTTPException(
@@ -1121,6 +1183,8 @@ def query(req: QueryRequest):
     )
 
     p = parse(q)
+    
+    p["vessel"] = assistant_vessel
 
     # ---------------------------------------------------------
     # GEMINI PLANNER
@@ -1555,7 +1619,8 @@ def query(req: QueryRequest):
         result = run_multi_agent_plan(
             p,
             fallback_plan,
-            target_z
+            target_z,
+            assistant_vessel,
         )
 
         if (
@@ -1959,7 +2024,7 @@ def query(req: QueryRequest):
             "5. Fuel & route — Ensure you have sufficient fuel and a safe planned route.",
         ]
         if target_z:
-            s = safety(target_z)
+            s = safety(target_z, assistant_vessel)
             if s.get("status") == "success":
                 risk_level = s.get("risk_level", "UNKNOWN")
                 risk_score = s.get("risk_score")
@@ -2037,8 +2102,8 @@ def query(req: QueryRequest):
             "comparison",
             "safety_comparison"
         ]:
-            sa = safety(z)
-            sb = safety(z2)
+            sa = safety(z, assistant_vessel)
+            sb = safety(z2, assistant_vessel)
 
             if (
                 sa.get("status") != "success"
@@ -2186,7 +2251,7 @@ def query(req: QueryRequest):
 
     # Specific current zone safety
     if z and qt == "zone_safety":
-        s = safety(z)
+        s = safety(z, assistant_vessel)
 
         if s.get("status") != "success":
             return {
@@ -2246,7 +2311,7 @@ def query(req: QueryRequest):
         f = (
             forecast(safety_zone)
             if qt in ["future_safety", "wave_safety", "wind_safety"]
-            else safety(safety_zone)
+            else safety(safety_zone, assistant_vessel)
         )
         
         if f.get("status")!="success":return {"status":"error","parsed":p,"message":f.get("message")}
@@ -2995,7 +3060,7 @@ def query(req: QueryRequest):
                     "answer":"A cyclone warning would increase wind, wave and cyclone risk and can move the safety assessment toward CAUTION or UNSAFE. ORCA requires the warning’s forecast inputs to calculate the new numerical score; it will not invent those values."}
 
         if qt == "cyclone_risk" and target_z:
-            s = safety(target_z)
+            s = safety(target_z, assistant_vessel)
 
             evidence = s.get("evidence", {})
 
@@ -3047,7 +3112,7 @@ def query(req: QueryRequest):
 
         # General safety query
         if "safety" in p["intents"] and target_z:
-            s = safety(target_z)
+            s = safety(target_z, assistant_vessel)
             return {"status":"success","mode":"general_safety","zone_id":target_z,"safety":s,
                     "answer":f"Safety at nearest zone {target_z}: {s.get('risk_level','UNKNOWN')} risk (score {s.get('risk_score','N/A')}). {s.get('message','')}"}
 
