@@ -8,6 +8,12 @@ import { apiGet } from "./apiClient";
 interface SafetyApiResponse {
   status: string;
   zone_id?: string | null;
+
+  location?: {
+    latitude: number;
+    longitude: number;
+  } | null;
+
   risk_score?: number | null;
   risk_level?: string | null;
   evidence?: Record<string, any>;
@@ -16,6 +22,10 @@ interface SafetyApiResponse {
 /** Raw numeric evidence values as returned by the Safety Agent. */
 export interface SafetyRawEvidence {
   zone_id: string | null;
+
+  latitude: number | null;
+  longitude: number | null;
+
   risk_score: number | null;
   risk_level: string | null;
   safety_score: number | null;
@@ -110,9 +120,19 @@ export async function getSafetyReport(location: UserLocation): Promise<SafetyRes
 
   const raw: SafetyRawEvidence = {
     zone_id: response.zone_id ?? null,
-    risk_score: riskScore != null ? round(riskScore, 4) : null,
+
+    latitude: response.location?.latitude ?? location.latitude,
+    longitude: response.location?.longitude ?? location.longitude,
+
+    risk_score:
+      riskScore != null
+        ? round(riskScore, 4)
+        : null,
+
     risk_level: riskLevel,
+
     safety_score: safetyScore,
+
     wind_speed_ms: rawNum("wind_speed_ms"),
     wave_height_m: rawNum("wave_height_m"),
     wave_period_s: rawNum("wave_period_s"),
@@ -121,16 +141,31 @@ export async function getSafetyReport(location: UserLocation): Promise<SafetyRes
     cyclone_wind_kt: rawNum("cyclone_wind_kt"),
     rainfall_mean: rawNum("rainfall_mean"),
     current_speed_ms: rawNum("current_speed_ms"),
+
     lightning: (() => {
       const l = (evidence as Record<string, unknown>)["lightning"];
-      if (!l || typeof l !== "object") return null;
+
+      if (!l || typeof l !== "object") {
+        return null;
+      }
+
       const lo = l as Record<string, unknown>;
+
       return {
         available: Boolean(lo["available"]),
-        risk: lo["risk"] != null ? Number(lo["risk"]) : null,
-        raw_jkg: lo["raw_jkg"] != null ? Number(lo["raw_jkg"]) : null,
+        risk:
+          lo["risk"] != null
+            ? Number(lo["risk"])
+            : null,
+        raw_jkg:
+          lo["raw_jkg"] != null
+            ? Number(lo["raw_jkg"])
+            : null,
         source: String(lo["source"] ?? ""),
-        timestamp: lo["timestamp"] != null ? String(lo["timestamp"]) : null,
+        timestamp:
+          lo["timestamp"] != null
+            ? String(lo["timestamp"])
+            : null,
       };
     })(),
   };

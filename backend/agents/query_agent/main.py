@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
 from backend.agents.query_agent.schemas import QueryRequest, NavigateRequest
+from backend.api.ocean_api import OceanRequest, analyze_ocean
 from backend.gemini_client import ask_gemini, transcribe_audio, synthesize_speech
 from backend.agents.query_agent.gemini_planner import plan_query
 from backend.agents.query_agent.gemini_synthesizer import synthesize_answer
@@ -449,10 +450,62 @@ def ocean(z):
         {"zone_id": z},
         30
     )
+    
+def ocean_at_location(latitude, longitude):
+    """
+    Get live ocean conditions at an exact geographic location.
+
+    This is intentionally different from ocean(zone_id), which
+    retrieves canonical PFZ data.
+    """
+
+    if latitude is None or longitude is None:
+        return {
+            "status": "error",
+            "message": "Latitude and longitude are required."
+        }
+
+    return call(
+        f"{OCEAN_API}/ocean/analyze",
+        {
+            "zone_id": None,
+            "latitude": float(latitude),
+            "longitude": float(longitude),
+        },
+        30,
+    )
 
 def safety(z, vessel=None):
     payload = {
         "zone_id": z,
+    }
+
+    if vessel is not None:
+        payload["vessel"] = vessel
+
+    return call(
+        f"{SAFETY_API}/safety/analyze",
+        payload,
+        30,
+    )
+    
+def safety_at_location(latitude, longitude, vessel=None):
+    """
+    Get live safety conditions at an exact geographic location.
+
+    This does not resolve the location to a PFZ.
+    """
+
+    if latitude is None or longitude is None:
+        return {
+            "status": "error",
+            "message": "Latitude and longitude are required."
+        }
+
+    payload = {
+        "zone_id": None,
+        "latitude": float(latitude),
+        "longitude": float(longitude),
     }
 
     if vessel is not None:
@@ -897,11 +950,46 @@ def run_multi_agent_plan(p, gemini_plan, target_z=None, vessel=None):
 
     # For fishing recommendations without an explicit zone,
     # first use the Ocean Agent data to find the strongest zone.
-    if "ocean" in required_agents and not zone_id:
+    # ---------------------------------------------------------
+    # Resolve a PFZ only when the query actually needs one.
+    # ---------------------------------------------------------
+
+    zone_id = p.get("zone_id") or target_z
+
+    is_location_query = (
+        not zone_id
+        and p.get("latitude") is not None
+        and p.get("longitude") is not None
+    )
+
+    is_fishing_recommendation = (
+        "fishing" in p.get("intents", [])
+        and (
+            p.get("query_type") == "highest_fishing"
+            or p.get("gemini_plan", {}).get("action") == "recommend"
+        )
+    )
+
+    # Fishing recommendations need a PFZ.
+    if (
+        "ocean" in required_agents
+        and not zone_id
+        and is_fishing_recommendation
+    ):
         recommended = get_recommended_zone(
             p.get("latitude"),
             p.get("longitude")
         )
+
+        if recommended is None:
+            return {
+                "status": "error",
+                "mode": "multi_agent",
+                "parsed": p,
+                "message": "No ocean observations are available."
+            }
+
+        zone_id = recommended["zone_id"]
 
         if recommended is None:
             return {
@@ -914,11 +1002,6 @@ def run_multi_agent_plan(p, gemini_plan, target_z=None, vessel=None):
             }
 
         zone_id = recommended["zone_id"]
-
-    # If there is no fishing request but safety/route needs
-    # a zone, use the nearest zone to the user's location.
-    if not zone_id:
-        zone_id = target_z
 
     if not zone_id:
         return {
@@ -940,7 +1023,29 @@ def run_multi_agent_plan(p, gemini_plan, target_z=None, vessel=None):
     route_result = None
 
     if "ocean" in required_agents:
-        ocean_result = ocean(zone_id)
+        if zone_id:
+            ocean_result = ocean(zone_id)
+
+        elif (
+            p.get("latitude") is not None
+            and p.get("longitude") is not None
+        ):
+            # Exact location analysis
+            ocean_result = ocean_at_location(
+                p["latitude"],
+                p["longitude"],
+            )
+
+        else:
+            return {
+                "status": "needs_location",
+                "mode": "multi_agent",
+                "parsed": p,
+                "answer": (
+                    "Please provide your location so I can "
+                    "retrieve ocean conditions."
+                ),
+            }
 
         if ocean_result.get("status") != "success":
             return {
@@ -954,7 +1059,34 @@ def run_multi_agent_plan(p, gemini_plan, target_z=None, vessel=None):
             }
 
     if "safety" in required_agents:
-        safety_result = safety(zone_id, vessel)
+        if zone_id:
+            # Explicit PFZ safety
+            safety_result = safety(
+                zone_id,
+                vessel,
+            )
+
+        elif (
+            p.get("latitude") is not None
+            and p.get("longitude") is not None
+        ):
+            # Exact location safety
+            safety_result = safety_at_location(
+                p["latitude"],
+                p["longitude"],
+                vessel,
+            )
+
+        else:
+            return {
+                "status": "needs_location",
+                "mode": "multi_agent",
+                "parsed": p,
+                "answer": (
+                    "Please provide your location so I can "
+                    "retrieve safety conditions."
+                ),
+            }
 
         if safety_result.get("status") != "success":
             return {
@@ -1383,9 +1515,6 @@ def query(
     z2 = p["comparison_zone"]
 
     target_z = z
-
-    if not target_z and p["latitude"] is not None and p["longitude"] is not None:
-        target_z = str(nearest(p["latitude"], p["longitude"]).zone_id)
         
     # ---------------------------------------------------------
     # DETERMINISTIC FISHING RECOMMENDATION
@@ -3039,21 +3168,72 @@ def query(
     # cyclone_risk or general safety/ocean with no zone — use nearest zone if location available
     if (qt in ["cyclone_risk", "cyclone_scenario"] or (qt == "general" and ("safety" in p["intents"] or "fishing" in p["intents"] or "ocean" in p["intents"]))):
         # General ocean conditions
-        if "ocean" in p["intents"] and target_z:
-            o = ocean(target_z)
+        if "ocean" in p["intents"]:
+            # ---------------------------------------------------------
+            # Explicit PFZ
+            # ---------------------------------------------------------
+            if z:
+                o = ocean(z)
 
-            return {
-                "status": "success",
-                "mode": "general_ocean",
-                "zone_id": target_z,
-                "ocean": o,
-                "answer": (
-                    f"Ocean conditions near your location, using nearest zone {target_z}: "
-                    f"SST {o.get('sst_c', 'N/A')}°C, "
-                    f"chlorophyll {o.get('chlorophyll_mg_m3', 'N/A')} mg/m³, "
-                    f"and current speed {o.get('current_speed_ms', 'N/A')} m/s."
+                return {
+                    "status": "success",
+                    "mode": "general_ocean_zone",
+                    "zone_id": z,
+                    "ocean": o,
+                    "answer": (
+                        f"Ocean conditions at {z}: "
+                        f"SST {o.get('sst_c', 'N/A')}°C, "
+                        f"chlorophyll "
+                        f"{o.get('chlorophyll_mg_m3', 'N/A')} mg/m³, "
+                        f"and current speed "
+                        f"{o.get('current_speed_ms', 'N/A')} m/s."
+                    )
+                }
+
+            # ---------------------------------------------------------
+            # Exact current location
+            # ---------------------------------------------------------
+            if (
+                p.get("latitude") is not None
+                and p.get("longitude") is not None
+            ):
+                o = ocean_at_location(
+                    p["latitude"],
+                    p["longitude"],
                 )
-            }
+
+                if o.get("status") != "success":
+                    return {
+                        "status": "error",
+                        "mode": "general_ocean",
+                        "message": o.get(
+                            "message",
+                            "Ocean Agent failed."
+                        ),
+                    }
+
+                return {
+                    "status": "success",
+                    "mode": "general_ocean_location",
+                    "zone_id": None,
+                    "location": {
+                        "latitude": p["latitude"],
+                        "longitude": p["longitude"],
+                    },
+                    "ocean": o,
+                    "answer": (
+                        f"Current ocean conditions at "
+                        f"{float(p['latitude']):.4f}, "
+                        f"{float(p['longitude']):.4f}: "
+                        f"SST {o.get('sst_c', 'N/A')}°C, "
+                        f"chlorophyll "
+                        f"{o.get('chlorophyll_mg_m3', 'N/A')} mg/m³, "
+                        f"current speed "
+                        f"{o.get('current_speed_ms', 'N/A')} m/s, "
+                        f"and wave height "
+                        f"{o.get('wave_height_m', 'N/A')} m."
+                    ),
+                }
 
         if qt == "cyclone_scenario":
             return {"status":"success","mode":qt,"parsed":p,
@@ -3111,10 +3291,51 @@ def query(
                 }
 
         # General safety query
-        if "safety" in p["intents"] and target_z:
-            s = safety(target_z, assistant_vessel)
-            return {"status":"success","mode":"general_safety","zone_id":target_z,"safety":s,
-                    "answer":f"Safety at nearest zone {target_z}: {s.get('risk_level','UNKNOWN')} risk (score {s.get('risk_score','N/A')}). {s.get('message','')}"}
+        if "safety" in p["intents"]:
+            if z:
+                s = safety(z, assistant_vessel)
+
+                return {
+                    "status": "success",
+                    "mode": "general_safety_zone",
+                    "zone_id": z,
+                    "safety": s,
+                    "answer": (
+                        f"Safety at {z}: "
+                        f"{s.get('risk_level', 'UNKNOWN')} risk "
+                        f"(score {s.get('risk_score', 'N/A')}). "
+                        f"{s.get('message', '')}"
+                    ),
+                }
+
+            if (
+                p.get("latitude") is not None
+                and p.get("longitude") is not None
+            ):
+                s = safety_at_location(
+                    p["latitude"],
+                    p["longitude"],
+                    assistant_vessel,
+                )
+
+                return {
+                    "status": "success",
+                    "mode": "general_safety_location",
+                    "zone_id": None,
+                    "location": {
+                        "latitude": p["latitude"],
+                        "longitude": p["longitude"],
+                    },
+                    "safety": s,
+                    "answer": (
+                        f"Safety conditions at "
+                        f"{float(p['latitude']):.4f}, "
+                        f"{float(p['longitude']):.4f}: "
+                        f"{s.get('risk_level', 'UNKNOWN')} risk "
+                        f"(score {s.get('risk_score', 'N/A')}). "
+                        f"{s.get('message', '')}"
+                    ),
+                }
 
     if qt == "route_geometry":
         return {"status":"needs_location","mode":qt,"parsed":p,
@@ -3413,31 +3634,65 @@ def get_fishing_zones(
         )
 
 @app.get("/api/ocean")
-def get_ocean_conditions(latitude: float | None = None, longitude: float | None = None):
-    """Get ocean conditions for the frontend dashboard."""
+def get_ocean_conditions(
+    latitude: float | None = None,
+    longitude: float | None = None,
+):
+    """
+    Get current ocean conditions at the user's actual location.
+
+    This endpoint is location-based, NOT PFZ-based.
+    Live marine/weather variables are queried at the supplied
+    coordinates. Chlorophyll uses the nearest Copernicus L4
+    ~4 km grid cell.
+    """
+
     try:
-        # Find nearest zone if coordinates provided
-        if latitude is not None and longitude is not None:
-            nearest_zone = nearest(latitude, longitude)
-            zone_id = str(nearest_zone.zone_id)
-        else:
-            # Get first available zone as fallback
-            zone_id = zones(True)[0] if zones(True) else None
-        
-        if not zone_id:
-            raise HTTPException(status_code=404, detail="No zones available")
-        
-        # Call Ocean Agent
-        ocean_response = ocean(zone_id)
-        
+        if latitude is None or longitude is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Latitude and longitude are required."
+            )
+
+        # ---------------------------------------------------------
+        # QUERY LIVE OCEAN DATA AT EXACT USER LOCATION
+        # ---------------------------------------------------------
+        ocean_response = analyze_ocean(
+            OceanRequest(
+                latitude=latitude,
+                longitude=longitude,
+            )
+        )
+
         if ocean_response.get("status") != "success":
-            raise HTTPException(status_code=500, detail=ocean_response.get("message", "Ocean API error"))
-        
+            raise HTTPException(
+                status_code=500,
+                detail=ocean_response.get(
+                    "message",
+                    "Ocean API error"
+                )
+            )
+
+        # Make it explicit that this is location-based data.
+        ocean_response["location_based"] = True
+        ocean_response["location"] = {
+            "latitude": latitude,
+            "longitude": longitude,
+        }
+
+        # There is intentionally NO zone_id here.
+        ocean_response["zone_id"] = None
+
         return ocean_response
+
     except HTTPException:
         raise
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
 
 @app.get("/api/safety")
 def get_safety_conditions(
@@ -3445,38 +3700,45 @@ def get_safety_conditions(
     latitude: float | None = None,
     longitude: float | None = None
 ):
-    """Get safety conditions for a specific PFZ or current location."""
+    """Get safety conditions for a specific PFZ or exact location."""
 
     try:
         # ---------------------------------------------------------
-        # SPECIFIC ZONE REQUEST
+        # SPECIFIC PFZ REQUEST
         # ---------------------------------------------------------
-        # When the user clicks a PFZ on the map, use that exact
-        # zone instead of finding the nearest zone.
+        # Used when a user explicitly selects a PFZ.
         # ---------------------------------------------------------
         if zone_id:
             target_zone = zone_id.upper().strip()
 
+            safety_response = safety(target_zone)
+
         # ---------------------------------------------------------
-        # LOCATION-BASED REQUEST
+        # EXACT LOCATION REQUEST
         # ---------------------------------------------------------
-        # Keep the existing behaviour for the Dashboard Safety
-        # widget, which asks for safety near the vessel.
+        # Used by the Safety & Alerts dashboard.
+        # DO NOT resolve this to the nearest PFZ.
         # ---------------------------------------------------------
         elif latitude is not None and longitude is not None:
-            nearest_zone = nearest(latitude, longitude)
-            target_zone = str(nearest_zone.zone_id)
+
+            safety_response = call(
+                f"{SAFETY_API}/safety/analyze",
+                {
+                    "zone_id": None,
+                    "latitude": latitude,
+                    "longitude": longitude,
+                },
+                30,
+            )
 
         else:
             raise HTTPException(
                 status_code=400,
-                detail="Provide zone_id or latitude and longitude."
+                detail=(
+                    "Provide zone_id or "
+                    "latitude and longitude."
+                )
             )
-
-        # ---------------------------------------------------------
-        # CALL SAFETY AGENT FOR THIS ONE ZONE ONLY
-        # ---------------------------------------------------------
-        safety_response = safety(target_zone)
 
         if safety_response.get("status") != "success":
             raise HTTPException(

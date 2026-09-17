@@ -53,7 +53,7 @@ print(f"Safety dataset loaded: {len(df)} rows")
 # REQUEST SCHEMAS
 # ---------------------------------------------------------
 class SafetyRequest(BaseModel):
-    zone_id: str
+    zone_id: str | None = None
     latitude: float | None = None
     longitude: float | None = None
     vessel: dict | None = None

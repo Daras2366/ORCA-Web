@@ -122,14 +122,7 @@ function Page() {
             <h1 className="text-xl font-semibold text-shell">Ocean Conditions</h1>
             <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
               <MapPin className="size-3.5 shrink-0 text-accent" />
-              {locationLabel
-                ? `${locationLabel} · ${coordLabel}`
-                : coordLabel}
-              {raw?.zone_id && (
-                <span className="ml-1 rounded-full border border-border bg-deep px-2 py-0.5 text-[10px] text-muted-foreground">
-                  nearest zone: {raw.zone_id}
-                </span>
-              )}
+              {locationLabel ? `${locationLabel} · ${coordLabel}` : coordLabel}
             </p>
           </div>
 
@@ -139,20 +132,18 @@ function Page() {
             size="sm"
             className="gap-2"
             disabled={oceanQuery.isFetching}
-            onClick={() => { void oceanQuery.refetch(); }}
+            onClick={() => {
+              void oceanQuery.refetch();
+            }}
           >
-            <RefreshCw
-              className={`size-3.5 ${oceanQuery.isFetching ? "animate-spin" : ""}`}
-            />
+            <RefreshCw className={`size-3.5 ${oceanQuery.isFetching ? "animate-spin" : ""}`} />
             Refresh
           </Button>
         </div>
 
         {/* ── Updated-at timestamp ───────────────────────────────── */}
         {conditions && (
-          <p className="text-xs text-muted-foreground">
-            Last updated: {conditions.updated_at}
-          </p>
+          <p className="text-xs text-muted-foreground">Last updated: {conditions.updated_at}</p>
         )}
 
         {/* ── Error state ────────────────────────────────────────── */}
@@ -165,7 +156,9 @@ function Page() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => { void oceanQuery.refetch(); }}
+              onClick={() => {
+                void oceanQuery.refetch();
+              }}
             >
               Retry
             </Button>
@@ -220,64 +213,67 @@ function Page() {
           </section>
         )}
 
-        {/* ── Data Summary ───────────────────────────────────────── */}
-        {oceanQuery.isSuccess && raw && (
+        {/* ── Data Sources ───────────────────────────────────────── */}
+        {oceanQuery.isSuccess && oceanQuery.data && (
           <section className="panel p-4">
-            <h2 className="mb-4 text-sm font-semibold text-shell">Data Summary</h2>
+            <h2 className="mb-4 text-sm font-semibold text-shell">Data Sources</h2>
+
             <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {/* SST */}
               <SummaryRow
-                label="Source Zone"
-                value={raw.zone_id ?? "N/A"}
-              />
-              <SummaryRow
-                label="Fishing Score (HSI)"
+                label="Sea Surface Temperature"
                 value={
-                  raw.fishing_score != null
-                    ? raw.fishing_score.toFixed(4)
-                    : "N/A"
+                  `${oceanQuery.data.data_sources.sst} · ` + `${oceanQuery.data.data_modes.sst}`
                 }
               />
+
+              {/* Ocean Current */}
               <SummaryRow
-                label="Sea Surface Temp"
-                value={raw.sst_c != null ? `${raw.sst_c.toFixed(2)} °C` : "N/A"}
+                label="Ocean Current"
+                value={
+                  `${oceanQuery.data.data_sources.ocean_current} · ` +
+                  `${oceanQuery.data.data_modes.ocean_current}`
+                }
               />
+
+              {/* Waves */}
+              <SummaryRow
+                label="Wave Data"
+                value={
+                  `${oceanQuery.data.data_sources.wave} · ` + `${oceanQuery.data.data_modes.wave}`
+                }
+              />
+
+              {/* Chlorophyll */}
               <SummaryRow
                 label="Chlorophyll"
                 value={
-                  raw.chlorophyll_mean != null
-                    ? `${raw.chlorophyll_mean.toFixed(3)} mg/m³`
-                    : "N/A"
+                  `${oceanQuery.data.data_sources.chlorophyll} · ` +
+                  `${oceanQuery.data.data_modes.chlorophyll}`
                 }
               />
+
+              {/* Data Location */}
+              <SummaryRow label="Data Location" value={`${coordLabel}`} />
+
+              {/* Fishing HSI */}
               <SummaryRow
-                label="Current Speed"
-                value={
-                  raw.current_speed_ms != null
-                    ? `${raw.current_speed_ms.toFixed(2)} m/s`
-                    : "N/A"
-                }
+                label="Fishing Potential (HSI)"
+                value={raw?.fishing_score != null ? raw.fishing_score.toFixed(4) : "N/A"}
               />
-              {raw.pfz_distance_km != null && (
-                <SummaryRow
-                  label="Distance to Zone"
-                  value={`${raw.pfz_distance_km.toFixed(1)} km`}
-                />
-              )}
             </dl>
           </section>
         )}
 
         {/* ── Empty state: success but no metrics ───────────────── */}
-        {oceanQuery.isSuccess &&
-          conditions &&
-          conditions.metrics.length === 0 && (
-            <div className="flex flex-col items-center gap-2 py-16 text-center">
-              <Waves className="size-8 text-muted-foreground/40" />
-              <p className="text-sm text-muted-foreground">
-                No ocean metrics are available for this location.
-              </p>
-            </div>
-          )}
+        {oceanQuery.isSuccess && conditions && conditions.metrics.length === 0 && (
+          <div className="flex flex-col items-center gap-2 py-16 text-center">
+            <Waves className="size-8 text-muted-foreground/40" />
+            <p className="text-sm text-muted-foreground">
+              No ocean metrics are available for this location.
+            </p>
+          </div>
+        )}
       </div>
     </AppShell>
   );

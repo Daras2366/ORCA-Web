@@ -146,9 +146,7 @@ function OverviewCard({ raw }: { raw: SafetyRawEvidence }) {
   const Icon = styles.icon;
 
   return (
-    <div
-      className={`rounded-xl border ${styles.border} bg-card p-4 space-y-4`}
-    >
+    <div className={`rounded-xl border ${styles.border} bg-card p-4 space-y-4`}>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <div className={`rounded-full border p-2 ${styles.badge}`}>
@@ -159,7 +157,10 @@ function OverviewCard({ raw }: { raw: SafetyRawEvidence }) {
               {level === "UNKNOWN" ? "No Data" : level + " RISK"}
             </p>
             <p className="text-xs text-muted-foreground">
-              Nearest zone: {raw.zone_id ?? "—"}
+              Data location:{" "}
+              {raw.latitude != null && raw.longitude != null
+                ? `${raw.latitude.toFixed(4)}, ${raw.longitude.toFixed(4)}`
+                : "—"}
             </p>
           </div>
         </div>
@@ -169,9 +170,7 @@ function OverviewCard({ raw }: { raw: SafetyRawEvidence }) {
               <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
                 Risk Score
               </p>
-              <p className={`text-xl font-bold ${styles.text}`}>
-                {raw.risk_score.toFixed(2)}
-              </p>
+              <p className={`text-xl font-bold ${styles.text}`}>{raw.risk_score.toFixed(2)}</p>
             </div>
           )}
           {raw.safety_score != null && (
@@ -181,9 +180,7 @@ function OverviewCard({ raw }: { raw: SafetyRawEvidence }) {
               </p>
               <p className="text-xl font-bold text-safe">
                 {raw.safety_score.toFixed(1)}
-                <span className="text-sm font-normal text-muted-foreground">
-                  /100
-                </span>
+                <span className="text-sm font-normal text-muted-foreground">/100</span>
               </p>
             </div>
           )}

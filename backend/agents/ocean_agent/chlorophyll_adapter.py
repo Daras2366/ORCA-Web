@@ -62,25 +62,20 @@ def _download_chlorophyll(
     date: datetime,
 ) -> tuple[float | None, str | None]:
     """
-    Download a small L4 CHL subset and return the nearest
-    grid-cell value.
-
-    Returns:
-        (chlorophyll_value, observation_date)
+    Download a small Copernicus Marine L4 CHL subset and
+    return the nearest valid ocean grid-cell value.
     """
 
-    start = date.strftime(
-        "%Y-%m-%dT00:00:00"
-    )
+    start = date.strftime("%Y-%m-%dT00:00:00")
+    end = (
+        date + timedelta(days=1)
+    ).strftime("%Y-%m-%dT00:00:00")
 
     min_lon = longitude - BOX_DEGREES
     max_lon = longitude + BOX_DEGREES
     min_lat = latitude - BOX_DEGREES
     max_lat = latitude + BOX_DEGREES
 
-    # Create a date-specific temporary/cache directory.
-    # This prevents one request from accidentally reading
-    # a NetCDF file created by another request.
     cache_root = (
         Path(__file__).resolve().parents[3]
         / "copernicus_cache"
@@ -94,16 +89,21 @@ def _download_chlorophyll(
 
     output_dir.mkdir(
         parents=True,
-        exist_ok=True
+        exist_ok=True,
     )
 
     try:
+        print(
+            f"[CHL] Requesting Copernicus "
+            f"{date.strftime('%Y-%m-%d')} "
+            f"at ({latitude:.4f}, {longitude:.4f})"
+        )
 
         copernicusmarine.subset(
             dataset_id=DATASET_ID,
             variables=["CHL"],
             start_datetime=start,
-            end_datetime=start,
+            end_datetime=end,
             minimum_longitude=min_lon,
             maximum_longitude=max_lon,
             minimum_latitude=min_lat,
@@ -111,77 +111,220 @@ def _download_chlorophyll(
             output_directory=str(output_dir),
         )
 
-        nc_files = list(
-            output_dir.glob("*.nc")
-        )
+        nc_files = list(output_dir.glob("*.nc"))
 
         if not nc_files:
+            print("[CHL] Copernicus returned no NetCDF file.")
             return None, None
 
-        # There should normally be one file in this
-        # date/coordinate-specific directory.
         file_path = nc_files[0]
+
+        print(f"[CHL] Reading {file_path.name}")
 
         with xr.open_dataset(file_path) as ds:
 
+            print(
+                f"[CHL] Dimensions: {dict(ds.sizes)}"
+            )
+            print(
+                f"[CHL] Variables: {list(ds.data_vars)}"
+            )
+            print(
+                f"[CHL] Coordinates: {list(ds.coords)}"
+            )
+
             if "CHL" not in ds:
+                print("[CHL] CHL variable not found.")
                 return None, None
 
             if (
                 "latitude" not in ds.coords
                 or "longitude" not in ds.coords
             ):
+                print(
+                    "[CHL] Latitude/longitude coordinates "
+                    "not found."
+                )
                 return None, None
 
             chl = ds["CHL"]
 
-            values = np.asarray(
-                chl.squeeze().values,
-                dtype=float
-            )
+            # -------------------------------------------------
+            # Select the requested day first.
+            # This fixes the 3D (time, latitude, longitude)
+            # indexing problem seen in the previous code.
+            # -------------------------------------------------
+            if "time" in chl.dims:
+                time_values = np.asarray(
+                    ds["time"].values
+                )
 
-            if values.size == 0:
-                return None, None
+                # Convert both sides to timezone-free day precision.
+                target_time = np.datetime64(
+                    date.strftime("%Y-%m-%d"),
+                    "D",
+                )
+
+                dataset_times = time_values.astype(
+                    "datetime64[D]"
+                )
+
+                time_idx = int(
+                    np.abs(dataset_times - target_time).argmin()
+                )
+
+                print(
+                    f"[CHL] Selected time index {time_idx}: "
+                    f"{dataset_times[time_idx]}"
+                )
+
+                chl = chl.isel(time=time_idx)
+
+            chl = chl.squeeze(drop=True)
 
             lats = np.asarray(
                 ds["latitude"].values,
-                dtype=float
+                dtype=float,
             )
 
             lons = np.asarray(
                 ds["longitude"].values,
-                dtype=float
+                dtype=float,
             )
 
+            values = np.asarray(
+                chl.values,
+                dtype=float,
+            )
+
+            print(
+                f"[CHL] Spatial array shape: {values.shape}"
+            )
+
+            # -------------------------------------------------
+            # Make sure we have a 2D latitude x longitude array.
+            # -------------------------------------------------
+            if values.ndim != 2:
+                print(
+                    f"[CHL] Unexpected CHL dimensions: "
+                    f"{values.shape}"
+                )
+                return None, None
+
+            # -------------------------------------------------
+            # Find the closest grid cell.
+            # -------------------------------------------------
             lat_idx = int(
-                np.abs(
-                    lats - latitude
-                ).argmin()
+                np.abs(lats - latitude).argmin()
             )
 
             lon_idx = int(
-                np.abs(
-                    lons - longitude
-                ).argmin()
+                np.abs(lons - longitude).argmin()
             )
 
-            value = float(
+            nearest_value = float(
                 values[lat_idx, lon_idx]
             )
 
-            if not np.isfinite(value):
+            # -------------------------------------------------
+            # If the closest pixel is NaN (common near coastlines),
+            # search the downloaded area for the closest VALID
+            # chlorophyll pixel.
+            # -------------------------------------------------
+            if not np.isfinite(nearest_value):
+
+                print(
+                    "[CHL] Nearest Copernicus cell is NaN. "
+                    "Searching nearby valid ocean cells..."
+                )
+
+                valid_mask = np.isfinite(values)
+
+                if not valid_mask.any():
+                    print(
+                        "[CHL] No valid CHL pixels found "
+                        "in the requested area."
+                    )
+                    return None, None
+
+                valid_indices = np.argwhere(
+                    valid_mask
+                )
+
+                # Calculate geographic distance for every
+                # valid pixel and select the closest one.
+                lat_values = lats[
+                    valid_indices[:, 0]
+                ]
+
+                lon_values = lons[
+                    valid_indices[:, 1]
+                ]
+
+                distances = (
+                    (lat_values - latitude) ** 2
+                    + (lon_values - longitude) ** 2
+                )
+
+                closest_valid_idx = int(
+                    np.argmin(distances)
+                )
+
+                valid_lat_idx = int(
+                    valid_indices[
+                        closest_valid_idx, 0
+                    ]
+                )
+
+                valid_lon_idx = int(
+                    valid_indices[
+                        closest_valid_idx, 1
+                    ]
+                )
+
+                nearest_value = float(
+                    values[
+                        valid_lat_idx,
+                        valid_lon_idx,
+                    ]
+                )
+
+                print(
+                    f"[CHL] Using nearby valid ocean pixel "
+                    f"at ({lats[valid_lat_idx]:.4f}, "
+                    f"{lons[valid_lon_idx]:.4f})"
+                )
+
+            # -------------------------------------------------
+            # Final validation
+            # -------------------------------------------------
+            if not np.isfinite(nearest_value):
+                print(
+                    "[CHL] No valid Copernicus CHL value."
+                )
                 return None, None
 
+            print(
+                f"[CHL] Copernicus SUCCESS: "
+                f"{nearest_value:.4f} mg/m3 "
+                f"({date.strftime('%Y-%m-%d')})"
+            )
+
             return (
-                value,
-                date.strftime("%Y-%m-%d")
+                nearest_value,
+                date.strftime("%Y-%m-%d"),
             )
 
     except Exception as exc:
-
         print(
-            f"[CHL] Copernicus request failed "
-            f"for {date.strftime('%Y-%m-%d')}: {exc}"
+            f"[CHL] Copernicus FAILED "
+            f"for {date.strftime('%Y-%m-%d')}"
+        )
+        print(
+            f"[CHL] Error type: {type(exc).__name__}"
+        )
+        print(
+            f"[CHL] Error: {exc}"
         )
 
         return None, None
@@ -243,7 +386,7 @@ def _get_csv_fallback(
                 None,
 
             "source":
-                "ORCA historical/satellite dataset",
+                "MOSDAC",
 
             "data_mode":
                 "fallback",
