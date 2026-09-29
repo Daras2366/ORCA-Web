@@ -14,6 +14,7 @@ from backend.agents.routing_agent.routing.cache import (
     get_routing_cache,
     is_cache_initialized,
     get_cache_error,
+    get_cache_info,
 )
 from backend.agents.routing_agent.routing.service import run_route
 
@@ -37,22 +38,20 @@ print("### ORCA QUERY AGENT LOADED FROM:", __file__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialize routing cache on startup."""
-    # Startup
-    try:
-        print("[Query Agent] Initializing routing cache...")
-        initialize_routing_cache()
-        cache_info = get_routing_cache()
-        print(f"[Query Agent] Routing cache initialized: {cache_info['grid_rows']}x{cache_info['grid_cols']} grid, {cache_info['navigable_cells']} navigable cells")
-    except Exception as exc:
-        print(f"[Query Agent] Failed to initialize routing cache: {exc}")
-        # Continue startup even if routing cache fails - other features will work
-        print("[Query Agent] Navigation endpoint will be unavailable")
-    
+    """Application lifespan — routing data is loaded lazily on first navigate request."""
+    # Routing cache is intentionally NOT loaded here.
+    # Loading the two large NetCDF files (~235 MB) at startup would exceed
+    # Render's 512 MB free-tier memory limit before any request is served.
+    # Instead, initialize_routing_cache() is called inside navigate_route()
+    # on the first POST /api/route/navigate request.  All other endpoints
+    # (query, ocean, safety, transcribe, synthesize, feedback, health …)
+    # remain fully available immediately after startup.
+    print("[Query Agent] Started. Routing data will be loaded on first navigate request.")
+
     yield
-    
+
     # Shutdown (cleanup if needed)
-    print("[Query Agent] Shutting down...")
+    print("[Query Agent] Shutting down.")
 
 app = FastAPI(
     title="ORCA Query Agent",
@@ -3801,20 +3800,40 @@ def navigate_route(request: NavigateRequest):
     
     Returns a JSON response with route metrics and GeoJSON geometry.
     """
-    # Check if routing cache is initialized
+    # Lazy-initialize routing cache on first navigate request.
+    # The two large NetCDF files (~235 MB) are only loaded when A* routing
+    # is actually needed, keeping startup memory within Render's free tier.
     if not is_cache_initialized():
-        cache_error = get_cache_error()
-        raise HTTPException(
-            status_code=503,
-            detail=f"Routing service unavailable: {cache_error or 'Cache not initialized'}"
-        )
-    
-    # Get routing cache
+        # Re-check the error flag: if a previous attempt failed, surface that
+        # rather than retrying indefinitely with a broken file.
+        prior_error = get_cache_error()
+        if prior_error is not None:
+            raise HTTPException(
+                status_code=503,
+                detail=f"Routing service unavailable: {prior_error}",
+            )
+        # First request — load now.
+        try:
+            print("[Query Agent] Lazy-loading routing cache on first navigate request...")
+            initialize_routing_cache()
+            _cache_info = get_cache_info()
+            print(
+                f"[Query Agent] Routing cache ready: "
+                f"{_cache_info['grid_rows']}x{_cache_info['grid_cols']} grid, "
+                f"{_cache_info['navigable_cells']} navigable cells"
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503,
+                detail=f"Routing service unavailable: {exc}",
+            )
+
+    # Get routing cache (guaranteed non-None at this point)
     cache = get_routing_cache()
     if cache is None:
         raise HTTPException(
             status_code=503,
-            detail="Routing cache not available"
+            detail="Routing cache not available",
         )
     
     # Call routing service with cached data
