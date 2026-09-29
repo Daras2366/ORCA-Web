@@ -106,8 +106,7 @@ def main():
     )
 
     print(
-        "  Depth-blocked:",
-        summary["depth_blocked_cells"]
+        "  Depth-blocked: (computed from depth_m on demand)"
     )
 
     print(
@@ -184,16 +183,8 @@ def main():
         == bathymetry.navigable.shape
     )
 
-    assert (
-        bathymetry.depth_safe.shape
-        == bathymetry.navigable.shape
-    )
-
-    assert (
-        bathymetry.depth_blocked.shape
-        == bathymetry.navigable.shape
-    )
-
+    # elevation_m, depth_safe, depth_blocked no longer stored in BathymetryData
+    # (they were unused by routing and have been removed to save ~47 MB)
     assert (
         vessel_safe.shape
         == bathymetry.navigable.shape

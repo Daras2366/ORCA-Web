@@ -70,14 +70,14 @@ def calculate_route_metrics(
 
         depths.append(depth)
 
-        current_speed = float(
-            currents.current_speed_ms[row, col]
-        )
-
-        if math.isfinite(current_speed):
-            current_speeds.append(
-                current_speed
+        # current_speed_ms was removed from CurrentData to save ~31 MB.
+        # Derive the scalar magnitude from the retained u/v components.
+        if currents.current_data_available[row, col]:
+            current_speed = math.hypot(
+                float(currents.current_u_ms[row, col]),
+                float(currents.current_v_ms[row, col]),
             )
+            current_speeds.append(current_speed)
 
     # Calculate every route edge.
     for source_node, target_node in zip(

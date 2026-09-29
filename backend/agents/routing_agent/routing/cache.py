@@ -35,6 +35,7 @@ Usage::
 
 from __future__ import annotations
 
+import gc
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -183,7 +184,11 @@ def initialize_routing_cache(
         _cache_error = error_msg
         _cache_initialized = False
         raise RuntimeError(error_msg) from exc
-    
+
+    # Explicitly collect transient xarray/numpy temporaries from bathymetry
+    # loading before allocating the next large dataset.
+    gc.collect()
+
     # Load currents (pass bathymetry coordinates to avoid duplication)
     if not curr_path.exists():
         error_msg = f"Current dataset not found: {curr_path}"
@@ -202,6 +207,9 @@ def initialize_routing_cache(
         _cache_error = error_msg
         _cache_initialized = False
         raise RuntimeError(error_msg) from exc
+
+    # Collect transient current loading temporaries before grid construction.
+    gc.collect()
     
     # Build MarineGrid from bathymetry (reusing arrays to save memory)
     try:

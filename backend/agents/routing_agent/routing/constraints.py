@@ -76,8 +76,11 @@ def build_constraint_mask(
         | unsafe_depth
     )
 
+    # The result of boolean arithmetic on bool arrays is already bool.
+    # Using np.asarray avoids the extra 7.83 MB copy that
+    # blocked.astype(bool) would produce needlessly.
     return ConstraintMask(
-        blocked=blocked.astype(bool)
+        blocked=np.asarray(blocked, dtype=bool)
     )
 
 

@@ -12,6 +12,18 @@ class CurrentData:
     Ocean-current state aligned to the ORCA routing grid.
 
     U and V are horizontal current components in m/s.
+
+    Memory-optimised layout
+    -----------------------
+    current_speed_ms and current_direction_deg are not stored as
+    resident 2-D arrays.  The A* cost function only reads:
+      - current_u_ms          (for current_along_direction)
+      - current_v_ms          (for current_along_direction)
+      - current_data_available (availability mask)
+
+    Removing the two derived scalar-field arrays saves 2 x 31.31 MB
+    = 62.62 MB of resident RAM (plus the same again as transient
+    allocation during load_currents).
     """
 
     latitudes: np.ndarray
@@ -19,9 +31,6 @@ class CurrentData:
 
     current_u_ms: np.ndarray
     current_v_ms: np.ndarray
-
-    current_speed_ms: np.ndarray
-    current_direction_deg: np.ndarray
 
     current_data_available: np.ndarray
 
@@ -31,7 +40,8 @@ class CurrentData:
     timestamp: str | None = None
 
     def __post_init__(self):
-        # Store references instead of copying to save memory
+        # np.asarray with matching dtype returns the same array object
+        # (no copy) when the input is already a C-contiguous numpy array.
         if not isinstance(self.latitudes, np.ndarray):
             self.latitudes = np.asarray(self.latitudes, dtype=np.float32)
         if not isinstance(self.longitudes, np.ndarray):
@@ -47,16 +57,6 @@ class CurrentData:
             dtype=np.float32,
         )
 
-        self.current_speed_ms = np.asarray(
-            self.current_speed_ms,
-            dtype=np.float32,
-        )
-
-        self.current_direction_deg = np.asarray(
-            self.current_direction_deg,
-            dtype=np.float32,
-        )
-
         self.current_data_available = np.asarray(
             self.current_data_available,
             dtype=bool,
@@ -69,16 +69,10 @@ class CurrentData:
                 "Current arrays must be 2-dimensional."
             )
 
-        arrays = {
+        for name, array in {
             "current_v_ms": self.current_v_ms,
-            "current_speed_ms": self.current_speed_ms,
-            "current_direction_deg": self.current_direction_deg,
-            "current_data_available": (
-                self.current_data_available
-            ),
-        }
-
-        for name, array in arrays.items():
+            "current_data_available": self.current_data_available,
+        }.items():
             if array.shape != shape:
                 raise ValueError(
                     f"{name} has shape {array.shape}, "
@@ -149,13 +143,27 @@ def load_currents(
     """
     Load the processed ORCA current dataset.
 
-    The expected current information is:
+    Only the variables needed by A* are loaded:
+        - U component   (current_u_ms)
+        - V component   (current_v_ms)
+        - availability  (current_data_available)
 
-        U component
-        V component
-        current speed
-        current direction
-        data availability
+    current_speed_ms and current_direction_deg are skipped entirely
+    — the cost function derives the along-route component directly
+    from U/V, so the stored speed/direction arrays are redundant.
+    Skipping them saves 2 x 31.31 MB = 62.62 MB resident RAM.
+
+    Memory strategy
+    ---------------
+    Variables are extracted sequentially so that at any moment
+    only one (raw xarray array + one numpy conversion) is live,
+    rather than all variables simultaneously.
+
+    ``np.asarray(..., dtype=T)`` is used instead of ``.astype(T)``
+    to avoid allocating a duplicate array when the on-disk dtype
+    already matches the target (float32/bool here).  np.asarray
+    returns the original array unchanged when dtype/layout match;
+    .astype always creates a fresh copy.
 
     Parameters
     ----------
@@ -179,9 +187,9 @@ def load_currents(
     ds = xr.open_dataset(filepath)
 
     try:
-        # ----------------------------------------------------
+        # ------------------------------------------------------------------
         # Coordinates
-        # ----------------------------------------------------
+        # ------------------------------------------------------------------
 
         if latitudes is None or longitudes is None:
             if "lat" not in ds.coords:
@@ -194,18 +202,22 @@ def load_currents(
                     "Current dataset is missing 'lon' coordinate."
                 )
 
-            latitudes = ds["lat"].values.astype(np.float32)
-            longitudes = ds["lon"].values.astype(np.float32)
+            latitudes = np.asarray(
+                ds["lat"].values, dtype=np.float32
+            )
+            longitudes = np.asarray(
+                ds["lon"].values, dtype=np.float32
+            )
         else:
-            # Ensure passed coordinates are float32
+            # Ensure passed coordinates are float32 (no copy when already f32)
             latitudes = np.asarray(latitudes, dtype=np.float32)
             longitudes = np.asarray(longitudes, dtype=np.float32)
 
-        # ----------------------------------------------------
-        # Current variables
-        # ----------------------------------------------------
+        # ------------------------------------------------------------------
+        # U component — required
+        # ------------------------------------------------------------------
 
-        u = _find_variable(
+        u_var = _find_variable(
             ds,
             [
                 "current_u_ms",
@@ -215,7 +227,15 @@ def load_currents(
             ],
         )
 
-        v = _find_variable(
+        # np.asarray avoids a duplicate allocation when dtype already matches
+        u_values = np.asarray(u_var.values, dtype=np.float32)
+        del u_var  # free xarray reference immediately
+
+        # ------------------------------------------------------------------
+        # V component — required
+        # ------------------------------------------------------------------
+
+        v_var = _find_variable(
             ds,
             [
                 "current_v_ms",
@@ -225,27 +245,14 @@ def load_currents(
             ],
         )
 
-        speed = _find_variable(
-            ds,
-            [
-                "current_speed_ms",
-                "current_speed",
-                "speed_ms",
-            ],
-            required=False,
-        )
+        v_values = np.asarray(v_var.values, dtype=np.float32)
+        del v_var
 
-        direction = _find_variable(
-            ds,
-            [
-                "current_direction_deg",
-                "current_direction",
-                "direction_deg",
-            ],
-            required=False,
-        )
+        # ------------------------------------------------------------------
+        # Data availability — optional (derived from u/v if absent)
+        # ------------------------------------------------------------------
 
-        availability = _find_variable(
+        availability_var = _find_variable(
             ds,
             [
                 "current_data_available",
@@ -254,75 +261,21 @@ def load_currents(
             required=False,
         )
 
-        # ----------------------------------------------------
-        # Convert to NumPy
-        # ----------------------------------------------------
-
-        u_values = u.values.astype(
-            np.float32
-        )
-
-        v_values = v.values.astype(
-            np.float32
-        )
-
-        # ----------------------------------------------------
-        # Derive speed if not stored
-        # ----------------------------------------------------
-
-        if speed is None:
-            speed_values = np.sqrt(
-                u_values ** 2
-                + v_values ** 2
-            ).astype(np.float32)
-
+        if availability_var is not None:
+            availability_values = np.asarray(
+                availability_var.values, dtype=bool
+            )
+            del availability_var
         else:
-            speed_values = speed.values.astype(
-                np.float32
-            )
-
-        # ----------------------------------------------------
-        # Derive direction if not stored
-        # ----------------------------------------------------
-
-        if direction is None:
-            direction_values = (
-                np.degrees(
-                    np.arctan2(
-                        u_values,
-                        v_values,
-                    )
-                )
-                + 360.0
-            ) % 360.0
-
-            direction_values = (
-                direction_values.astype(np.float32)
-            )
-
-        else:
-            direction_values = (
-                direction.values.astype(np.float32)
-            )
-
-        # ----------------------------------------------------
-        # Derive availability if not stored
-        # ----------------------------------------------------
-
-        if availability is None:
+            # Derive: a cell has data where both u and v are finite.
             availability_values = (
                 np.isfinite(u_values)
                 & np.isfinite(v_values)
             )
 
-        else:
-            availability_values = (
-                availability.values.astype(bool)
-            )
-
-        # ----------------------------------------------------
-        # Timestamp
-        # ----------------------------------------------------
+        # ------------------------------------------------------------------
+        # Timestamp (metadata only, negligible cost)
+        # ------------------------------------------------------------------
 
         timestamp = None
 
@@ -342,25 +295,25 @@ def load_currents(
 
                     break
 
-        return CurrentData(
-            latitudes=latitudes,
-            longitudes=longitudes,
-
-            current_u_ms=u_values,
-            current_v_ms=v_values,
-
-            current_speed_ms=speed_values,
-            current_direction_deg=direction_values,
-
-            current_data_available=(
-                availability_values
-            ),
-
-            timestamp=timestamp,
-        )
+        # NOTE: current_speed_ms and current_direction_deg are NOT loaded.
+        # cost.py computes the along-route current directly from u/v:
+        #   along = u * sin(dir_rad) + v * cos(dir_rad)
+        # Storing speed/direction as resident arrays wastes 2 x 31 MB.
 
     finally:
         ds.close()
+
+    return CurrentData(
+        latitudes=latitudes,
+        longitudes=longitudes,
+
+        current_u_ms=u_values,
+        current_v_ms=v_values,
+
+        current_data_available=availability_values,
+
+        timestamp=timestamp,
+    )
 
 
 def validate_alignment(
@@ -432,10 +385,10 @@ def current_along_direction(
         opposing current
 
     Direction convention:
-        0°   = North
-        90°  = East
-        180° = South
-        270° = West
+        0   = North
+        90  = East
+        180 = South
+        270 = West
     """
 
     direction_rad = np.radians(

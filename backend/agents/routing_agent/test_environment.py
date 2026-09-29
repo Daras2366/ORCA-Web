@@ -170,17 +170,12 @@ def main():
 
         sys.exit(1)
 
-    u_valid = currents.current_u_ms[
-        valid
-    ]
+    u_valid = currents.current_u_ms[valid]
+    v_valid = currents.current_v_ms[valid]
 
-    v_valid = currents.current_v_ms[
-        valid
-    ]
-
-    speed_valid = currents.current_speed_ms[
-        valid
-    ]
+    # current_speed_ms is no longer stored (saves 31 MB).
+    # Derive speed from u/v for display purposes.
+    speed_valid = np.sqrt(u_valid**2 + v_valid**2)
 
     print(
         "\nCurrent statistics:"
@@ -203,7 +198,7 @@ def main():
     )
 
     print(
-        "  Speed min/max:",
+        "  Speed min/max (derived):",
         float(speed_valid.min()),
         "/",
         float(speed_valid.max()),
@@ -308,11 +303,8 @@ def main():
         == currents.current_v_ms.shape
     )
 
-    assert (
-        currents.current_speed_ms.shape
-        == currents.current_u_ms.shape
-    )
-
+    # current_speed_ms and current_direction_deg are no longer stored
+    # (they were unused by A* and have been removed to save 2 x 31 MB)
     assert (
         currents.current_data_available.shape
         == currents.current_u_ms.shape
