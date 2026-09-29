@@ -58,29 +58,45 @@ def get_live_conditions(latitude, longitude):
     cached = _single_cache.get(key)
 
     if cached and now - cached["time"] < CACHE_TTL:
+        print("[Safety] Open-Meteo cache HIT")
         return cached["data"]
 
-    marine = _get_json(MARINE_API, {
-        "latitude": latitude,
-        "longitude": longitude,
-        "current": (
-            "wave_height,wave_period,wave_direction,"
-            "ocean_current_velocity,ocean_current_direction,"
-            "sea_surface_temperature"
-        ),
-        "timezone": "UTC",
-        "cell_selection": "sea"
-    })
+    print("[Safety] Open-Meteo cache MISS")
 
-    weather = _get_json(WEATHER_API, {
-        "latitude": latitude,
-        "longitude": longitude,
-        "current": (
-            "wind_speed_10m,wind_direction_10m,precipitation"
-        ),
-        "wind_speed_unit": "kmh",
-        "timezone": "UTC"
-    })
+    try:
+        marine = _get_json(MARINE_API, {
+            "latitude": latitude,
+            "longitude": longitude,
+            "current": (
+                "wave_height,wave_period,wave_direction,"
+                "ocean_current_velocity,ocean_current_direction,"
+                "sea_surface_temperature"
+            ),
+            "timezone": "UTC",
+            "cell_selection": "sea"
+        })
+
+        weather = _get_json(WEATHER_API, {
+            "latitude": latitude,
+            "longitude": longitude,
+            "current": (
+                "wind_speed_10m,wind_direction_10m,precipitation"
+            ),
+            "wind_speed_unit": "kmh",
+            "timezone": "UTC"
+        })
+
+    except requests.HTTPError as e:
+        if e.response.status_code == 429:
+            print("[Safety] Open-Meteo returned 429; using cached data if available")
+            if cached:
+                print("[Safety] Using stale cached data due to 429")
+                return cached["data"]
+            else:
+                print("[Safety] No cached data available; cannot recover from 429")
+                raise
+        else:
+            raise
 
     cyclone = get_cyclone_risk(
         latitude,
@@ -128,7 +144,10 @@ def get_live_conditions_bulk(
         now - _bulk_cache["time"] < CACHE_TTL
         and _bulk_cache["data"]
     ):
+        print("[Safety] Open-Meteo bulk cache HIT")
         return _bulk_cache["data"]
+
+    print("[Safety] Open-Meteo bulk cache MISS")
 
     results = {}
 
@@ -272,11 +291,20 @@ def get_live_conditions_bulk(
                 }
 
         except requests.HTTPError as e:
-            print(
-                f"[LIVE] Batch "
-                f"{start}:{start + len(chunk)} "
-                f"failed: {e}"
-            )
+            if e.response.status_code == 429:
+                print(f"[Safety] Open-Meteo returned 429 on bulk request {start}:{start + len(chunk)}; using cached data if available")
+                if _bulk_cache["data"]:
+                    print("[Safety] Using stale bulk cached data due to 429")
+                    return _bulk_cache["data"]
+                else:
+                    print("[Safety] No cached bulk data available; cannot recover from 429")
+                    raise
+            else:
+                print(
+                    f"[LIVE] Batch "
+                    f"{start}:{start + len(chunk)} "
+                    f"failed: {e}"
+                )
 
         except Exception as e:
             print(

@@ -489,10 +489,27 @@ def analyze_safety(request: SafetyRequest):
         )
 
     except Exception as e:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Live safety data unavailable: {str(e)}"
-        )
+        print(f"[Safety] Open-Meteo unavailable; using fallback: {str(e)}")
+        # Provide a graceful fallback when Open-Meteo is unavailable
+        # This allows the service to continue functioning with limited data
+        live = {
+            "latitude": latitude,
+            "longitude": longitude,
+            "timestamp": None,
+            "wave_height_m": None,
+            "wave_period_s": None,
+            "wave_direction_deg": None,
+            "current_speed_ms": None,
+            "current_direction_deg": None,
+            "sst_c": None,
+            "wind_speed_kmh": None,
+            "wind_direction_deg": None,
+            "precipitation_mm": None,
+            "cyclone": get_cyclone_risk(latitude, longitude),
+            "lightning": get_mosdac_lightning_risk(latitude, longitude),
+            "source": "Fallback - Open-Meteo unavailable",
+            "data_mode": "fallback"
+        }
 
     # --------------------------------------------------
     # LIVE RISK
@@ -518,7 +535,7 @@ def analyze_safety(request: SafetyRequest):
     return {
         "agent": "Safety Agent",
         "status": "success",
-        "mode": "live",
+        "mode": live.get("data_mode", "live"),
         "data_source": data_source,
         "timestamp": live.get("timestamp"),
 
