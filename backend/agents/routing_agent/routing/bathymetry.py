@@ -107,9 +107,9 @@ def load_bathymetry(
         )
 
     data = BathymetryData(
-        latitudes=ds["lat"].values,
+        latitudes=ds["lat"].values.astype(np.float32),
 
-        longitudes=ds["lon"].values,
+        longitudes=ds["lon"].values.astype(np.float32),
 
         elevation_m=(
             ds["elevation_m"]

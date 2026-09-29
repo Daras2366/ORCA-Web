@@ -43,10 +43,16 @@ class MarineGrid:
     depth_m: np.ndarray
 
     def __post_init__(self):
-        self.latitudes = np.asarray(self.latitudes)
-        self.longitudes = np.asarray(self.longitudes)
-        self.navigable = np.asarray(self.navigable, dtype=bool)
-        self.depth_m = np.asarray(self.depth_m, dtype=np.float32)
+        # Store references instead of copying to save memory
+        # The arrays are already properly typed from BathymetryData
+        if not isinstance(self.latitudes, np.ndarray):
+            self.latitudes = np.asarray(self.latitudes, dtype=np.float32)
+        if not isinstance(self.longitudes, np.ndarray):
+            self.longitudes = np.asarray(self.longitudes, dtype=np.float32)
+        if not isinstance(self.navigable, np.ndarray):
+            self.navigable = np.asarray(self.navigable, dtype=bool)
+        if not isinstance(self.depth_m, np.ndarray):
+            self.depth_m = np.asarray(self.depth_m, dtype=np.float32)
 
         if self.navigable.ndim != 2:
             raise ValueError("navigable must be a 2D array")

@@ -31,13 +31,11 @@ class CurrentData:
     timestamp: str | None = None
 
     def __post_init__(self):
-        self.latitudes = np.asarray(
-            self.latitudes
-        )
-
-        self.longitudes = np.asarray(
-            self.longitudes
-        )
+        # Store references instead of copying to save memory
+        if not isinstance(self.latitudes, np.ndarray):
+            self.latitudes = np.asarray(self.latitudes, dtype=np.float32)
+        if not isinstance(self.longitudes, np.ndarray):
+            self.longitudes = np.asarray(self.longitudes, dtype=np.float32)
 
         self.current_u_ms = np.asarray(
             self.current_u_ms,
@@ -145,6 +143,8 @@ def _find_variable(
 
 def load_currents(
     filepath: str | Path,
+    latitudes: np.ndarray | None = None,
+    longitudes: np.ndarray | None = None,
 ) -> CurrentData:
     """
     Load the processed ORCA current dataset.
@@ -156,6 +156,17 @@ def load_currents(
         current speed
         current direction
         data availability
+
+    Parameters
+    ----------
+    filepath:
+        Path to the current NetCDF file.
+    latitudes:
+        Optional pre-loaded latitude array to avoid duplication.
+        If provided, will be used instead of loading from file.
+    longitudes:
+        Optional pre-loaded longitude array to avoid duplication.
+        If provided, will be used instead of loading from file.
     """
 
     filepath = Path(filepath)
@@ -172,18 +183,23 @@ def load_currents(
         # Coordinates
         # ----------------------------------------------------
 
-        if "lat" not in ds.coords:
-            raise ValueError(
-                "Current dataset is missing 'lat' coordinate."
-            )
+        if latitudes is None or longitudes is None:
+            if "lat" not in ds.coords:
+                raise ValueError(
+                    "Current dataset is missing 'lat' coordinate."
+                )
 
-        if "lon" not in ds.coords:
-            raise ValueError(
-                "Current dataset is missing 'lon' coordinate."
-            )
+            if "lon" not in ds.coords:
+                raise ValueError(
+                    "Current dataset is missing 'lon' coordinate."
+                )
 
-        latitudes = ds["lat"].values
-        longitudes = ds["lon"].values
+            latitudes = ds["lat"].values.astype(np.float32)
+            longitudes = ds["lon"].values.astype(np.float32)
+        else:
+            # Ensure passed coordinates are float32
+            latitudes = np.asarray(latitudes, dtype=np.float32)
+            longitudes = np.asarray(longitudes, dtype=np.float32)
 
         # ----------------------------------------------------
         # Current variables

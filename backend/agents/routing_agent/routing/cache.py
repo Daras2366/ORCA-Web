@@ -184,28 +184,32 @@ def initialize_routing_cache(
         _cache_initialized = False
         raise RuntimeError(error_msg) from exc
     
-    # Load currents
+    # Load currents (pass bathymetry coordinates to avoid duplication)
     if not curr_path.exists():
         error_msg = f"Current dataset not found: {curr_path}"
         _cache_error = error_msg
         _cache_initialized = False
         raise FileNotFoundError(error_msg)
-    
+
     try:
-        currents = load_currents(curr_path)
+        currents = load_currents(
+            curr_path,
+            latitudes=bathymetry.latitudes,
+            longitudes=bathymetry.longitudes
+        )
     except Exception as exc:
         error_msg = f"Failed to load current data: {exc}"
         _cache_error = error_msg
         _cache_initialized = False
         raise RuntimeError(error_msg) from exc
     
-    # Build MarineGrid from bathymetry
+    # Build MarineGrid from bathymetry (reusing arrays to save memory)
     try:
         grid = MarineGrid(
-            latitudes=bathymetry.latitudes,
-            longitudes=bathymetry.longitudes,
-            navigable=bathymetry.navigable,
-            depth_m=bathymetry.depth_m,
+            latitudes=bathymetry.latitudes,  # Reuse reference
+            longitudes=bathymetry.longitudes,  # Reuse reference
+            navigable=bathymetry.navigable,  # Reuse reference
+            depth_m=bathymetry.depth_m,  # Reuse reference
         )
     except Exception as exc:
         error_msg = f"Failed to construct routing grid: {exc}"
