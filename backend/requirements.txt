@@ -20,3 +20,4 @@ copernicusmarine
 xarray
 netcdf4
 scipy
+psycopg[binary]
