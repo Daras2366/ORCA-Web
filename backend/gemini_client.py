@@ -274,5 +274,3 @@ The text to speak begins below:
     print("ORCA TTS WAV header:", wav_bytes[:12])
 
     return wav_bytes
-
-    return wav_buffer.getvalue()

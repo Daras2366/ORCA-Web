@@ -83,7 +83,7 @@ frontend/.nitro/
 # Frontend local environment files
 frontend/.env
 frontend/.env.*
-frontend/.env.example
+!frontend/.env.example
 
 # Frontend logs
 frontend/npm-debug.log*

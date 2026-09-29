@@ -81,6 +81,12 @@ ROUTE_API = os.getenv("ROUTE_API", "http://localhost:8004")
 DECISION_API = os.getenv("DECISION_API", "http://localhost:8000")
 
 
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for Render."""
+    return {"status": "ok"}
+
+
 @app.post("/transcribe")
 async def transcribe_voice(
     file: UploadFile = File(...)

@@ -28,13 +28,19 @@ DATA_PATH = os.path.join(
     "unified_safety.csv"
 )
 
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:8080")
+
 app = FastAPI(
     title="ORCA Safety Agent API"
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:8080", "http://localhost:5173"],
+    allow_origins=[
+        FRONTEND_URL,
+        "http://localhost:8080",
+        "http://localhost:5173",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -390,6 +396,14 @@ def get_risk_level(risk_score):
 
     else:
         return "HIGH"
+
+
+# ---------------------------------------------------------
+# HEALTH
+# ---------------------------------------------------------
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
 
 
 # ---------------------------------------------------------

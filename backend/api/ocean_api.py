@@ -9,12 +9,17 @@ from math import radians, sin, cos, asin, sqrt
 from backend.agents.ocean_agent.live_ocean_adapter import get_live_ocean
 from backend.agents.ocean_agent.chlorophyll_adapter import get_chlorophyll
 
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:8080")
 
 app = FastAPI(title="ORCA Ocean Agent API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:8080", "http://localhost:5173"],
+    allow_origins=[
+        FRONTEND_URL,
+        "http://localhost:8080",
+        "http://localhost:5173",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -162,6 +167,11 @@ def calculate_hsi(
             if current_score is None
             else round(current_score, 4)
     }
+
+
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
 
 
 @app.get("/")

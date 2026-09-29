@@ -43,6 +43,11 @@ app.include_router(router)
 app.include_router(vessel_router)
 
 
+@app.get("/health", tags=["health"])
+def health_check():
+    return {"status": "ok"}
+
+
 @app.get("/", tags=["health"])
 def health():
     return {

@@ -18,3 +18,5 @@ python-multipart
 
 copernicusmarine
 xarray
+netcdf4
+scipy

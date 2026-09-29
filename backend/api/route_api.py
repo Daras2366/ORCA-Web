@@ -34,6 +34,8 @@ from backend.agents.routing_agent.predict import predict_route  # noqa: E402
 # ---------------------------------------------------------------------------
 # FastAPI application
 # ---------------------------------------------------------------------------
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:8080")
+
 app = FastAPI(
     title="ORCA Routing Agent API",
     description="M3_v2 deterministic route scoring engine for ORCA",
@@ -43,6 +45,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
+        FRONTEND_URL,
         "http://localhost:8080",
         "http://localhost:5173",
     ],
@@ -77,6 +80,12 @@ class RouteRequest(BaseModel):
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
+
+@app.get("/health")
+def health_check():
+    """Health check endpoint for Render."""
+    return {"status": "ok"}
 
 
 @app.get("/")

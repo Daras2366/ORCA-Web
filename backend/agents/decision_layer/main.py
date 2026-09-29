@@ -1,9 +1,12 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+import os
 
 from backend.agents.decision_layer.schemas import DecisionRequest, CombinedDecisionRequest
 from backend.agents.decision_layer.scoring import calculate_final_score
 from backend.agents.decision_layer.constraints import apply_constraints
+
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:8080")
 
 app = FastAPI(
     title="ORCA Decision Layer",
@@ -12,7 +15,11 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:8080", "http://localhost:5173"],
+    allow_origins=[
+        FRONTEND_URL,
+        "http://localhost:8080",
+        "http://localhost:5173",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -48,6 +55,11 @@ def generate_why(fishing_score, risk_score, safety_score, route_score, decision)
         + ", ".join(reasons)
         + f". Final decision score is {round((0.40*fishing_score + 0.35*safety_score + 0.25*route_score), 4)}."
     )
+
+
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
 
 
 @app.get("/")
